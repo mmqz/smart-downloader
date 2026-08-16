@@ -41,6 +41,29 @@ lt_err lt_status(lt_session* s, const char* ih, lt_torrent_status* out);
 /* M0 补充：本地测试用 peer 注入（本地 seeder 直连，无需 tracker） */
 lt_err lt_add_peer(lt_session* s, const char* ih, const char* ip, uint16_t port);
 
+/* —— M0/spike：alert 队列（D31 预算 ≤12 种；扁平化值拷贝，所有权归 wrapper；溢出计数）—— */
+typedef enum {
+    LT_ALERT_TRACKER  = 1,
+    LT_ALERT_PEER     = 2,
+    LT_ALERT_ERROR    = 4,
+    LT_ALERT_METADATA = 8,
+    LT_ALERT_STATE    = 16,
+    LT_ALERT_RESUME   = 32,
+    LT_ALERT_PIECE    = 64
+} lt_alert_mask;
+
+typedef struct {
+    int   kind;            /* 对应 mask 位 */
+    char  ih[41];          /* 相关 torrent infohash（非 torrent 类为空串） */
+    char  msg[512];        /* 人类可读（tracker 错误/peer 断开原因/resume 失败原因…） */
+    int64_t at;            /* 毫秒时间戳 */
+    int   resume_ready;    /* RESUME 时：1=可调 lt_take_resume_data */
+} lt_alert;
+
+lt_err lt_set_alert_mask(lt_session* s, const char* ih, uint32_t mask);
+lt_err lt_pop_alerts(lt_session* s, lt_alert* buf, size_t cap, size_t* out_count);
+lt_err lt_alerts_dropped(lt_session* s, uint32_t* out);
+
 #ifdef __cplusplus
 }
 #endif
