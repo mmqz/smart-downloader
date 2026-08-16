@@ -319,6 +319,25 @@ lt_err lt_read_piece(lt_session* s, const char* ih, int idx, uint8_t* buf, size_
 
 > 其余 ~70 种 libtorrent alert 在 v1 **不扁平化**（C++ 侧丢弃并计数），避免 M1 失控。
 
+### 8.5 alert 字段级 schema（D31 终稿，M0.3 闸门产出）
+
+`lt_alert` 为统一值结构 `{ kind: int, ih[41], msg[512], at: int64, resume_ready: int }`。各 kind 的字段填充规则：
+
+| kind | 触发源（libtorrent alert） | ih | msg 填充 | resume_ready |
+| :--- | :--- | :--- | :--- | :--- |
+| METADATA | `metadata_received_alert` | 对应 ih | "metadata received" | 0 |
+| STATE·FINISHED | `torrent_finished_alert` / state_changed→finished_seeding | 对应 ih | "finished" | 0 |
+| STATE·PAUSED | `torrent_paused_alert`（D19 同步点） | 对应 ih | "paused" | 0 |
+| STATE·ERROR | `torrent_error_alert` | 对应 ih | error.message() | 0 |
+| RESUME·SAVED | `save_resume_data_alert` | 对应 ih | "resume ready" | **1**（随后 Rust 调 lt_take_resume_data） |
+| RESUME·FAILED | `save_resume_data_failed_alert` | 对应 ih | 失败原因 | 0 |
+| TRACKER | `tracker_error_alert` / `tracker_announce_alert` | 对应 ih | tracker url + 状态/错误 | 0 |
+| PEER | `peer_connected_alert` / `peer_disconnected_alert` | 对应 ih | ip:port + 事件 | 0 |
+| PIECE | `piece_finished_alert`（可选，低优先） | 对应 ih | piece 索引 | 0 |
+| DHT | `dht_*`（可选） | "" | dht 统计 | 0 |
+
+Rust 侧 `AlertEvent` 枚举与之 1:1，serde 序列化为 WS 事件（§12.4）。字段增删 = 改 lt.h + cpp case + Rust 枚举（bindgen 重跑），改动面已封顶。
+
 ---
 
 ## 9. 所有权边界模型（核心）

@@ -88,6 +88,14 @@ lt_err lt_status(lt_session* s, const char* ih, float* progress_out, int* state_
 
 **验收**：spike 对比文档产出并冻结 D14；3 个脚本/测试全过（构建 ×2 + E2E ×1）。覆盖率不适用（基建层）。**超 2 天未通过 → 记录风险，回退方案：qBittorrent 进程底座（设计文档 D2 复核）**。
 
+**M0 出口自检清单**：
+- [ ] `2026-08-16-ffi-spike.md` 对比报告已产出，D14 已冻结（☐ 手写 C ABI / ☐ cxx）
+- [ ] 工具链脚本 `01_vcpkg.ps1`、`02_build.ps1` 退出码 0
+- [ ] `m0_magnet_e2e` PASS（本地 seeder，60s 内 progress>0）
+- [ ] `torrent_finished → lt_pause` 验证结论写回设计文档 §10.1（2.0.x 可靠性）
+- [ ] alert ≤12 种字段级 schema 终稿（设计文档 §8.5）
+- [ ] M1 可开工检查表：lt.h 全量 + btcore 骨架可编译、ASAN 配置就绪
+
 ---
 
 ## M1 — FFI 全量 + btcore（3–5 天）
