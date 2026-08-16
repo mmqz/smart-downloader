@@ -1,5 +1,5 @@
 //! M0 E2E 验收测试（TDD 计划 M0 Step 1）：真实磁力 60s 内 progress>0。
-//! 依赖：tests/integration/seed/ 本地 seeder 已起（2MB 测试文件，本地 tracker）。
+//! 依赖：tests/integration/seed/ 的 TestSeeder（自研 seed_main，2MB 测试文件，本地端口监听）。
 //! 前置：M0 spike 冻结 D14 后，`Bare` 由 btcore 提供（手写 C ABI 或 cxx 实现，测试不关心）。
 //! 当前为 TDD 红态：Bare 尚未实现，本测试编译失败即预期。
 
@@ -9,11 +9,12 @@ use smart_dl_btcore::Bare;
 
 #[test]
 fn real_magnet_makes_progress_within_60s() {
-    let seeder = TestSeeder::start(); // tests/integration/seed/ 提供本地 magnet
+    let seeder = TestSeeder::start(); // 自研 seed_main：输出 "SEED <magnet> PORT <port>"
     let save = tempdir();
     let session = Bare::new(save.path().to_str().unwrap(), "m0").unwrap();
 
     let ih = session.add_magnet(&seeder.magnet(), &[]).unwrap();
+    session.add_peer(&ih, seeder.addr()).unwrap(); // 本地直连注入，无需 tracker
 
     let deadline = Instant::now() + Duration::from_secs(60);
     let mut progress = 0.0f32;

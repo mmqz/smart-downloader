@@ -38,6 +38,9 @@ typedef struct {
 lt_err lt_add_magnet(lt_session* s, const char* magnet, const char** web_seeds, char* ih_out /*41 字节*/);
 lt_err lt_status(lt_session* s, const char* ih, lt_torrent_status* out);
 
+/* M0 补充：本地测试用 peer 注入（本地 seeder 直连，无需 tracker） */
+lt_err lt_add_peer(lt_session* s, const char* ih, const char* ip, uint16_t port);
+
 #ifdef __cplusplus
 }
 #endif

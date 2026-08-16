@@ -138,4 +138,19 @@ lt_err lt_status(lt_session* s, const char* ih, lt_torrent_status* out) {
     }
 }
 
+lt_err lt_add_peer(lt_session* s, const char* ih, const char* ip, uint16_t port) {
+    if (!s || !ih || !ip) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) return LT_ERR_NOT_FOUND;
+        lt::error_code ec;
+        lt::tcp::endpoint ep(lt::make_address(ip, ec), port);
+        if (ec) return LT_ERR_ARG;
+        h.add_peer(ep);
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
 } // extern "C"

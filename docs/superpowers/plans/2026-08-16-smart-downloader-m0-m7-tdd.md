@@ -44,15 +44,16 @@
 
 **目标**：Windows 上打通 `lt.h(手写) → lt_kernel.cpp → bindgen → Rust FFI` 全链路，真实磁力 progress>0。验证 F0 工具链方向与 libtorrent 构建可行性。
 
-**接口契约（M0 输出）**：
+**接口契约（M0 输出，6 函数）**：
 ```c
-/* ffi/lt.h 子集（M0 只实现这 5 个） */
+/* ffi/lt.h 子集（M0：session + magnet + status + peer 注入） */
 typedef struct lt_session lt_session;
 typedef enum { LT_OK=0, LT_ERR_ARG, LT_ERR_ENGINE, LT_ERR_IO, LT_ERR_NOT_FOUND, LT_ERR_BUFFER_TOO_SMALL } lt_err;
-lt_err lt_session_new(const char* default_save_path, const char* session_id, lt_session** out);
+lt_err lt_session_new(const char* save_path, const char* session_id, lt_session** out);
 void   lt_session_free(lt_session* s);
 lt_err lt_add_magnet(lt_session* s, const char* magnet, const char** web_seeds, char* ih_out /*41*/);
 lt_err lt_status(lt_session* s, const char* ih, float* progress_out, int* state_out);
+lt_err lt_add_peer(lt_session* s, const char* ih, const char* ip, uint16_t port); /* 本地 seeder 直连 */
 ```
 - [ ] **Step 0: 绑定工具 spike（D28）**：手写 C ABI 与 cxx 各实现最小内核（`lt_session_create`/`lt_pop_alerts`/`lt_status`，各 ~200 行）→ 产出 `docs/superpowers/plans/2026-08-16-ffi-spike.md`（对比：构建复杂度 / 内存契约维护 / 异常与回调处理 / alert 扁平化工作量）→ **冻结 D14**（默认手写 C ABI + bindgen；cxx 若显著降低 lt_kernel.cpp 复杂度则改选）
 - [ ] **Step 1: 写 M0 验收测试（先于任何实现）**

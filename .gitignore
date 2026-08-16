@@ -1,3 +1,4 @@
 /target
 /.tools
-ffi/build/
+/ffi/build/
+/ffi/vcpkg_installed/
