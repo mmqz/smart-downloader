@@ -2,8 +2,12 @@
 name = "smart-dl-btcore"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+
+[build-dependencies]
+bindgen = "0.71"
