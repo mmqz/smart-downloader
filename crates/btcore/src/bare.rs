@@ -2,7 +2,7 @@
 //! 契约对齐 ffi/lt.h（M0 子集）；完整 BtCore 见 M1。
 
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_int, c_float, c_uint, c_ushort};
+use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::ptr;
 
@@ -70,7 +70,12 @@ impl Bare {
             .map(|s| CString::new(s.as_str()).map_err(|_| Error::Arg))
             .collect::<Result<_>>()?;
         let ptrs: Vec<*const c_char> = cseeds.iter().map(|c| c.as_ptr()).collect();
-        let seeds_ptr: *const *const c_char = if ptrs.is_empty() { ptr::null() } else { ptrs.as_ptr() };
+        // bindgen 把 C 的 const char** 生成成 *mut *const c_char（外层指针可变）
+        let seeds_ptr: *mut *const c_char = if ptrs.is_empty() {
+            ptr::null_mut()
+        } else {
+            ptrs.as_ptr() as *mut *const c_char
+        };
 
         let mut ih = [0i8; 41];
         let code = unsafe { lt_add_magnet(self.raw, m.as_ptr(), seeds_ptr, ih.as_mut_ptr()) };
