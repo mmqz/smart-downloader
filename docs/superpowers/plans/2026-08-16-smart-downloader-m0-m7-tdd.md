@@ -22,6 +22,11 @@
 - 测试工具：`cargo install cargo-llvm-cov`（一次）；覆盖率命令 `cargo llvm-cov --workspace --html`（Windows 需 llvm-tools-preview：`rustup component add llvm-tools-preview`）
 - 测试基建目录：`tests/integration/`（BT seeder、HTTP server、FTP server 共用）
 - Commit 约定：每完成一个里程碑内一个任务即 commit，message 形如 `feat(m2): router matrix + tests`
+- **本机环境事实（2026-08-16 实测）**：沙箱拦截 schannel TLS（git/cargo/curl/iwr 全部 `SEC_E_NO_CREDENTIALS`，openssl/rustls 正常）。
+  - cargo / vcpkg / 任何 schannel 系联网命令 → 必须带 `sandbox_permissions=danger-full-access` 执行（已验证可行）
+  - git → 用 openssl 后端免加宽：`$env:GIT_CONFIG_COUNT=1; $env:GIT_CONFIG_KEY_0="http.sslBackend"; $env:GIT_CONFIG_VALUE_0="openssl"`
+  - python(urllib/openssl)、keenable(rustls)、rustup(rustls) 不受影响
+  - 原因定位：沙箱网络钩子拦截 schannel 凭据获取（加宽后即恢复），非机器 TLS 损坏
 
 ## 里程碑接口契约（前一个的输出 = 后一个的输入）
 
