@@ -2,3 +2,4 @@
 /.tools
 /ffi/build/
 /ffi/vcpkg_installed/
+/spike/target/
