@@ -16,6 +16,7 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .header(lt_h.to_str().unwrap())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .generate_comments(false)
         .generate()
         .expect("bindgen failed on ffi/lt.h");
     bindings
