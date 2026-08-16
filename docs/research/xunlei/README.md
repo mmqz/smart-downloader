@@ -1,0 +1,117 @@
+# 迅雷 BT 逆向研究 — 项目集成索引
+
+> **来源**: 独立研究 agent 的完整产出,2026-08-16 从沙箱迁移入库。
+> **完整合集**: `xunlei_research_complete.md`(824KB,含全部原始报告/反汇编 JSON/历史报告)。
+> **状态**: 研究完成 · PoC 合成验证通过 · 真实样本验证待用户提供
+
+---
+
+## 结论摘要(对 smart-downloader 的意义)
+
+1. **迅雷 BT 协议层 100% 标准**:BEP-3/5/6/8/9/10/11 全覆盖,piece SHA1 + infohash + piece length 与标准 BT 一致(A 级证据)。
+2. **迅雷 BT 占位文件不通用**:`.bt.xltd`(纯 piece 数据 sparse file,B 级)+ `.xlbt.cfg`(私有任务配置,头部 A 级、section 映射 C/D 级)。
+3. **路径 A = 主引擎**:纯 libtorrent,完全无黑盒依赖。→ 即本项目的 BT engine(base)。
+4. **路径 D = 用户迁移工具**:迅雷任务 → libtorrent fastresume 转换器(PoC 已通过合成样本端到端验证,piece hash 匹配率 1.0)。
+   - 决策记录见 `DECISIONS.md`(D-2026-08-16-01/02/04)。
+5. **剩余唯一门槛 = 真实样本验证**(用户操作,见 `sample_collection_guide.md`)。
+
+---
+
+## 目录结构
+
+```
+docs/research/xunlei/
+├── README.md                        ← 本索引
+├── xunlei_research_complete.md      ← 完整合集(原始归档,824KB)
+├── FINAL_REPORT.md                  ← 最终报告(核心结论,分层证据)
+├── SPEC 格式规范 / 推断清单
+│   ├── spec_pending_validation.md   ← .xlbt.cfg/.bt.xltd 格式规范(置信度 A/B/C/D)
+│   └── OPEN_QUESTIONS.md
+├── 研究状态
+│   ├── RESEARCH_STATE.md
+│   ├── FINDINGS.md
+│   └── DECISIONS.md
+├── NEXT_ACTION.md                   ← 下一步(两个决策点 + 真实样本验证)
+└── sample_collection_guide.md       ← 用户采集真实样本的手册(5-10 分钟)
+
+tools/xunlei-migrate/                ← 路径 D 转换器工具集(Python, 无第三方依赖)
+├── xunlei_to_libtorrent_converter.py   ← 转换器(默认 DIAGNOSTIC, --convert 才写文件)
+├── validate_xunlei_sample.py           ← 8 项验证器(真实样本验证入口)
+├── e2e_test_converter.py               ← 端到端测试(合成样本,已 100% 通过)
+├── parse_xlbt_cfg.py                   ← .xlbt.cfg 解析器
+├── gen_synthetic_full_cfg.py           ← 合成 cfg 生成器(完整版)
+└── gen_synthetic_cfg.py                ← 合成 cfg 生成器(简单版)
+```
+
+---
+
+## 现状与验收门槛
+
+| 项 | 状态 |
+|---|---|
+| 协议层标准性 / 引擎架构 | ✅ A 级证据 |
+| .xlbt.cfg 头部(40B + 20B entry) | ✅ A 级反汇编证据 |
+| .bt.xltd 纯数据 sparse 布局 | ⚠ B 级(多证据支持,未真实验证) |
+| section_id → 内容映射 | ❌ C/D 级猜测(**禁止写死进生产代码**) |
+| 转换器 PoC | ✅ 合成样本 e2e 通过(pieces_hash_match_rate=1.0, fastresume 271B 合法, .part 正确) |
+| 真实样本验证 | ⛔ 待用户提供(唯一外部依赖) |
+
+**铁律**(来自 spec):C/D 级推断(尤其 section_id 映射)禁止硬编码进生产代码;转换器默认诊断模式,验证通过前不产生任何文件变更。
+
+---
+
+## 如何运行
+
+### 1. 本地复跑合成 e2e(验证工具链完整)
+
+```powershell
+# 依赖: 仅 e2e 与合成生成需要 python libtorrent 绑定 (转换器/验证器本体是纯 stdlib)
+python -m pip install libtorrent   # 一次性
+
+python tools/xunlei-migrate/e2e_test_converter.py
+```
+
+预期:端到端报告显示 pieces_hash_match_rate = 1.0、fastresume/.part 校验通过(于本机实测通过)。
+
+> 注:`gen_synthetic_full_cfg.py` 会写 1GB 的 `.bt.xltd`(Linux 下为 sparse),Windows 上谨慎运行;
+> `gen_synthetic_cfg.py` 为小样本快速自检。
+
+### 2. 真实样本验证(样本到手后)
+
+```powershell
+# 验证(输出 verification.json)
+python tools/xunlei-migrate/validate_xunlei_sample.py `
+  --torrent <样本>.torrent --bt-xltd <样本>.bt.xltd --cfg <样本>.xlbt.cfg `
+  --report verification.json
+
+# 全部 8 项验证通过后 → 转换
+python tools/xunlei-migrate/xunlei_to_libtorrent_converter.py `
+  --torrent <样本>.torrent --bt-xltd <样本>.bt.xltd --cfg <样本>.xlbt.cfg `
+  --output-dir output --convert
+```
+
+验证通过后:把 `spec_pending_validation.md` 中 C/D 级升级为 A 级,解锁转换器为正式工具。
+
+### 3. 采集真实样本(需要你做,5-10 分钟)
+
+见 `sample_collection_guide.md`。要点:
+
+1. 迅雷 v25.x 下载任意 100MB-1GB BT 任务到 **30-50%** 时暂停
+2. **完全退出迅雷**(托盘退出 + 任务管理器结束 XLUE/Thunder/DownloadSDKServer)
+3. 复制三件套:`<任务名>.bt.xltd` + `<任务名>.xlbt.cfg` + 原始 `.torrent`
+4. zip 打包(bt.xltd 是 sparse,压缩后很小)提供给我
+5. 隐私注意:不要提供 `cid_store.dat`;`.xlbt.cfg` 可能含 device_id,介意可先 hex 检查
+
+---
+
+## 与主设计的关系
+
+- 主引擎保持不变:**单 libtorrent 基座**(路径 A),不含任何迅雷黑盒组件(design v0.6 §3)。
+- 路径 D 转换器是**可选的用户迁移工具**(v1 增量),产出 libtorrent fastresume + .part,可被 BT engine 直接续传。
+- 迅雷云盘 Provider(O5')已确认不做;`thunder_offline_research.md`(迅雷云盘 API 调研)另见 `docs/research/2026-08-16-thunder-offline-research.md`。
+
+## 结论
+
+- **研究线程已关闭**:所有在当前环境可达的结论与实验均已完成(下称"在当前条件下完成")。
+- **唯一剩余动作在用户侧**:提供真实样本后 1 小时内可完成全部 C/D 级升级验证。
+- 真实样本验证**不阻塞** M0-M7 主线(路径 A 完全独立)。

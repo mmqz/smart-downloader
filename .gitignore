@@ -3,3 +3,5 @@
 /ffi/build/
 /ffi/vcpkg_installed/
 /spike/target/
+/tools/xunlei-migrate/__pycache__/
+/tools/xunlei-migrate/e2e_out/
