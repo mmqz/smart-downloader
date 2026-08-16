@@ -1,0 +1,5 @@
+{
+  "name": "smart-downloader-ffi",
+  "version-string": "0.1.0",
+  "dependencies": [ "libtorrent" ]
+}
