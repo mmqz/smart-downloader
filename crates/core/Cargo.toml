@@ -9,3 +9,5 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
+uuid = { workspace = true }
+base64 = "0.22"
