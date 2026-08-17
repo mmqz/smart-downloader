@@ -12,3 +12,4 @@
 *.profraw
 *.profdata
 download.bin.part
+crates/daemon/download.bin

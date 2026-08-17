@@ -1,0 +1,53 @@
+# 最小 CI（D35）：纯 Rust crates 的 fmt/clippy/test。
+# BT 集成测试（btcore）依赖 vcpkg libtorrent 构建，见 bt-integration job（后置独立）。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    name: fmt + clippy + test (pure rust)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: rustfmt
+        run: cargo fmt --all --check
+
+      - name: clippy (deny warnings, excludes btcore)
+        run: >
+          cargo clippy --workspace --exclude smart-dl-btcore
+          --features smart-dl-httpdl/ftp -- -D warnings
+
+      - name: test core
+        run: cargo test -p smart-dl-core
+
+      - name: test httpdl (with ftp feature)
+        run: cargo test -p smart-dl-httpdl --features ftp
+
+      - name: test provider
+        run: cargo test -p smart-dl-provider
+
+      - name: test daemon
+        run: cargo test -p smart-dl-daemon
+
+  bt-integration:
+    # 后置独立：需 vcpkg libtorrent（见 scripts/m0/01_vcpkg.ps1）+ PATH 含
+    # ffi/vcpkg_installed/x64-windows/bin。本地验证命令：
+    #   $env:PATH = "<repo>\ffi\vcpkg_installed\x64-windows\bin;" + $env:PATH
+    #   cargo test -p smart-dl-btcore
+    name: bt integration (local, libtorrent)
+    runs-on: windows-latest
+    if: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: placeholder (see scripts/m0/01_vcpkg.ps1 for local run)
+        run: echo "BT integration tests run locally with vcpkg libtorrent"

@@ -1,7 +1,15 @@
-# 多引擎智能调度下载器 — 设计文档（Design v0.6 · 决策收口 + 独立评审 12 条已处置）
+# 多引擎智能调度下载器 — 设计文档（Design v1.0 · M0–M6 实现完成，偏差回填）
 
-> **状态：2026-08-16。23 项决策已拍板；v0.6 吸收独立评审 12 条（含 1 处事实修正）。架构冻结，进入 M0。**
+> **状态：2026-08-16 拍板决策（v0.6）→ 2026-08-17 M0–M6 全部交付（v1.0）**。
+> 23 项决策已拍板；v0.6 吸收独立评审 12 条（含 1 处事实修正）。
 > 配套文件：TDD 实施计划 `2026-08-16-smart-downloader-m0-m7-tdd.md`。
+
+> **v1.0 实现偏差回填（相对 v0.6 正文）**：
+> 1. **§15 FTP**：按计划并入 httpdl crate，feature-gated（`smart-dl-httpdl/ftp`）；CI 中 httpdl 测试带该 feature。正文无需修改。
+> 2. **§12 D36 WS 端点**：v1 交付 WsHub 协议层（9 类事件 + seq + 256 队列背压 + 跳号补拉/重连重同步，测试全覆盖），但 HTTP 层未提供真实 WebSocket 升级端点（`daemon/src/http.rs` 无 `ws` 路由，1s 快照节流为调度细节留骨架）——协议正确性由 WsHub 单元/集成测试保证，socket 端点在 M7+/运维层按需补。
+> 3. **§15/§18 D34 token 剔除**：daemon 查重 canonical 身份 v1 用 URL 字符串（token 剔除为 v2 项，`DaemonState::add_http_task` 注释已标）。
+> 4. **工具链工程**：cargo 1.100 nightly 起集成测试 exe 位于 `build/<pkg>/<hash>/out/`（非 deps/），覆盖率脚本按此收集（scripts/m4,m5,m6/04_coverage.ps1）；`cargo test --workspace` 需 PATH 含 `ffi/vcpkg_installed/x64-windows/bin`（btcore FFI 测试 DLL）。
+> 5. **§20 决策清单**：✅ 均为"决策已拍板采纳"（决策状态），非功能实现状态；M0–M6 已实现者：O1/O2/O3/O6（自研/CLI+WS/本机/FallbackPolicy）、B1–B15 中核心链路项（状态机/路由/HTTP 引擎/Provider 链路/WS 事件）、D21/D26 CLI 命令集（8 命令+fallback，Q-B9 入口）、D35 最小 CI（`.github/workflows/ci.yml`，btcore 后置）。**后置项**（已决策未实现，见 TDD 计划后续/运维层）：C 组参数运行时接线、B10 磁盘预检、B14 单实例锁、TOML 冷加载、1s 快照节流/WS socket 端点（偏差 2）、D34 token 剔除（偏差 3）。
 
 ---
 
