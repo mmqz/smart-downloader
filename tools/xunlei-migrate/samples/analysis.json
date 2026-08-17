@@ -1,0 +1,229 @@
+{
+  "cfg_size": 32768,
+  "torrent": {
+    "piece_length": 131072,
+    "num_pieces": 2263,
+    "files": [
+      {
+        "name": "Yu Omiya/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone/01 - My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone, Vol. 1 {Đavid Lee Huỳnh}/cover.jpg",
+        "offset": 0,
+        "size": 740642
+      },
+      {
+        "name": "Yu Omiya/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone/01 - My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone, Vol. 1 {Đavid Lee Huỳnh}/metadata.json",
+        "offset": 740642,
+        "size": 3125
+      },
+      {
+        "name": "Yu Omiya/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone/01 - My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone, Vol. 1 {Đavid Lee Huỳnh}/metadata.opf",
+        "offset": 743767,
+        "size": 1992
+      },
+      {
+        "name": "Yu Omiya/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone/01 - My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone, Vol. 1 {Đavid Lee Huỳnh}/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone v01 [Seven Seas Siren] [Stick].m4b",
+        "offset": 745759,
+        "size": 295849204
+      }
+    ],
+    "total": 296594963
+  },
+  "found": {
+    "magic": {
+      "offset": 0,
+      "value": "58444c4354580000"
+    },
+    "head_8_18": {
+      "offset": 8,
+      "value": "3d4b1364b9477132bcec08c8450b7016"
+    },
+    "u32@0x0018": 30025,
+    "u32@0x001c": 7,
+    "u32@0x0020": 0,
+    "u32@0x0024": 4,
+    "u32@0x0028": 0,
+    "u32@0x002c": 28584,
+    "u32@0x0030": 4,
+    "u32@0x0034": 262145,
+    "u32@0x0038": 40,
+    "infohash_ascii": {
+      "offset": 60,
+      "value": "C5AA149AE0776344A270EAFEE49FDADB43FF6097"
+    },
+    "int_nz": [
+      [
+        100,
+        1,
+        1868
+      ],
+      [
+        18792,
+        0,
+        131074
+      ],
+      [
+        18820,
+        0,
+        458753
+      ],
+      [
+        18840,
+        19700,
+        4514
+      ],
+      [
+        18850,
+        42192,
+        578
+      ],
+      [
+        18860,
+        22490,
+        3737
+      ],
+      [
+        18910,
+        0,
+        2
+      ],
+      [
+        18952,
+        0,
+        65538
+      ],
+      [
+        18994,
+        0,
+        131074
+      ],
+      [
+        19036,
+        0,
+        196610
+      ],
+      [
+        19078,
+        0,
+        262146
+      ],
+      [
+        19120,
+        0,
+        327682
+      ],
+      [
+        19162,
+        0,
+        393218
+      ],
+      [
+        19204,
+        0,
+        458754
+      ],
+      [
+        19246,
+        0,
+        524290
+      ],
+      [
+        19288,
+        0,
+        589826
+      ],
+      [
+        19330,
+        0,
+        655362
+      ],
+      [
+        19372,
+        0,
+        720898
+      ],
+      [
+        19414,
+        0,
+        786434
+      ],
+      [
+        19456,
+        0,
+        851970
+      ]
+    ],
+    "file_sizes": [
+      {
+        "size": 740642,
+        "offset": 28544
+      },
+      {
+        "size": 3125,
+        "offset": 28724
+      },
+      {
+        "size": 1992,
+        "offset": 28754
+      },
+      {
+        "size": 295849204,
+        "offset": 18842
+      }
+    ],
+    "peers": [
+      [
+        29114,
+        "bt://102.132.137.234:51229"
+      ],
+      [
+        29236,
+        "bt://185.149.91.151:51028"
+      ],
+      [
+        29357,
+        "bt://185.21.217.29:32777"
+      ],
+      [
+        29477,
+        "bt://205.147.16.145:52961"
+      ],
+      [
+        29572,
+        "bt://5.79.93.225:5678"
+      ],
+      [
+        29767,
+        "bt://66.56.81.64:23232"
+      ],
+      [
+        29885,
+        "bt://73.215.132.42:49718"
+      ],
+      [
+        30005,
+        "bt://83.143.119.19:51337"
+      ]
+    ],
+    "reserved_blobs": [
+      [
+        28684,
+        28692
+      ],
+      [
+        28714,
+        28722
+      ],
+      [
+        28744,
+        28752
+      ],
+      [
+        28774,
+        28782
+      ]
+    ],
+    "piece_verify": {
+      "hit": 1866,
+      "checked": 2263
+    }
+  }
+}

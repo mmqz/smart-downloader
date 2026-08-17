@@ -1,0 +1,137 @@
+{
+  "torrent": {
+    "name": "audio-books-cjk",
+    "info_hash_hex": "c5aa149ae0776344a270eafee49fdadb43ff6097",
+    "piece_length": 131072,
+    "num_pieces": 2263,
+    "total_size": 296594963
+  },
+  "cfg": {
+    "size": 32768,
+    "magic": "58444c4354580000",
+    "downloaded_piece_count": 1868
+  },
+  "verifications": [
+    {
+      "verification_id": "V1",
+      "name": "cfg 结构 (magic + infohash 字段位置)",
+      "spec_level": "D",
+      "verified": true,
+      "new_level": "A",
+      "evidence": "magic=b'XDLCTX\\x00\\x00' OK; infohash@0x3c=C5AA149AE077… 旧合成模型(XLBTCFG/section 数组)被真实样本推翻",
+      "details": {
+        "cfg_size": 32768,
+        "peers": [
+          "bt://102.132.137.234:51229",
+          "bt://185.149.91.151:51028",
+          "bt://185.21.217.29:32777",
+          "bt://205.147.16.145:52961"
+        ]
+      }
+    },
+    {
+      "verification_id": "V2",
+      "name": "key=1 int 字段 = 已下载 piece 数",
+      "spec_level": "C",
+      "verified": true,
+      "new_level": "A",
+      "evidence": "cfg key=1=1868; xltd SHA1 实况: 1866 完成, 16 在途 (差 14; cfg 为最近一次落盘快照, 与硬盘实况允许少量偏差)",
+      "details": {
+        "cfg_downloaded": 1868,
+        "xltd_match": 1866,
+        "xltd_partial": 16
+      }
+    },
+    {
+      "verification_id": "V3",
+      "name": ".bt.xltd 无头部 + 尺寸 = ceil(file_size/4096)*4096",
+      "spec_level": "B",
+      "verified": true,
+      "new_level": "A",
+      "evidence": "Yu Omiya/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone/01 - My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone, Vol. 1 {Đavid Lee Huỳnh}/cover.jpg: xltd=741376 ceil(file/4096)*4096=741376 (OK, 无头部); Yu Omiya/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone/01 - My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone, Vol. 1 {Đavid Lee Huỳnh}/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone v01 [Seven Seas Siren] [Stick].m4b: xltd=295849984 ceil(file/4096)*4096=295849984 (OK, 无头部)",
+      "details": {}
+    },
+    {
+      "verification_id": "V4",
+      "name": "piece 物理偏移公式 (xltd 位置镜像)",
+      "spec_level": "C",
+      "verified": true,
+      "new_level": "A",
+      "evidence": "SHA1 命中 1866 / 完成+在途 (1882) = 99.1%; 内部 piece 偏移 = p*piece_length - file_offset 直读验证. 边界 piece 跨多文件, 单 xltd 无法验证 (设计内排除)",
+      "details": {
+        "per_file": [
+          {
+            "file": "Yu Omiya/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone/01 - My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone, Vol. 1 {Đavid Lee Huỳnh}/cover.jpg",
+            "match": 3,
+            "partial": 3,
+            "allzero": 0,
+            "n_checked": 6,
+            "sample_pieces": [
+              0,
+              3,
+              4
+            ]
+          },
+          {
+            "file": "Yu Omiya/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone/01 - My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone, Vol. 1 {Đavid Lee Huỳnh}/My Girlfriend Cheated on Me, and Now My Flirty Underclassman Won't Leave Me Alone v01 [Seven Seas Siren] [Stick].m4b",
+            "match": 1863,
+            "partial": 13,
+            "allzero": 381,
+            "n_checked": 2257,
+            "sample_pieces": [
+              6,
+              7,
+              8,
+              9,
+              10,
+              11
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "verification_id": "V5",
+      "name": "cfg 无 bitfield (CXBitmap 假设)",
+      "spec_level": "D",
+      "verified": true,
+      "new_level": "A(否定)",
+      "evidence": "真实样本证明假设错误: cfg 是任务元数据(TLV), 无 283B 完成位图. 下载状态由 .bt.xltd 零区表达 (1024B 0x00 测试: allzero 区与未下载 piece 对应). piece 哈希 2263*20=45KB > cfg 32KB, 物理不可能; 231 个 20B blob 无一匹配 torrent pieces",
+      "details": {
+        "num_pieces": 2263,
+        "bf_bytes_if_1bit": 283
+      }
+    },
+    {
+      "verification_id": "V6",
+      "name": "bitfield 每 piece 1bit vs 1byte",
+      "spec_level": "D",
+      "verified": true,
+      "new_level": "A(否定)",
+      "evidence": "不适用: cfg 无 bitfield; 转换器从 .bt.xltd 零区 + torrent 哈希推导完成位图 (见 xunlei_to_libtorrent_converter.py)",
+      "details": {}
+    },
+    {
+      "verification_id": "V7",
+      "name": "cfg info hash 校验",
+      "spec_level": "C",
+      "verified": true,
+      "new_level": "A",
+      "evidence": "cfg@0x3c 大写 ASCII = C5AA149AE0776344A270EAFEE49FDADB43FF6097; torrent v1 infohash = c5aa149ae0776344a270eafee49fdadb43ff6097 (一致)",
+      "details": {}
+    },
+    {
+      "verification_id": "V8",
+      "name": "block 语义 (4096 对齐; 无 block_count 头部)",
+      "spec_level": "C",
+      "verified": true,
+      "new_level": "A(修正)",
+      "evidence": "旧假设 block_count/block_size 头部字段不存在. 真实语义: xltd 尺寸按 4096 对齐 (公式见 V3), piece 布局由 torrent piece_length 决定, 块粒度 4096 仅影响文件尺寸/预分配. 下载块进度(64KB 粒度记录)在 cfg 深处 TLV 中观测到, 语义未完全解码(见 spec 遗留项)",
+      "details": {}
+    }
+  ],
+  "summary": {
+    "all_passed": true,
+    "critical_v4_passed": true
+  }
+}

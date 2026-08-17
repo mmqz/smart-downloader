@@ -1,242 +1,153 @@
 """
-端到端测试: 用 libtorrent 生成一个最小 .torrent + 合成 .bt.xltd + 合成 .xlbt.cfg
-然后跑转换器的诊断模式,验证整套流程能跑通
+端到端测试: 真实格式合成样本 → 转换器全流程
 
-模拟一个真实 BT 任务场景:
-- .torrent: 用 libtorrent 生成 (含真实 infohash + piece hashes)
-- .bt.xltd: sparse file,只填前 N 个 piece 数据 (用对应 hash 的数据)
-- .xlbt.cfg: 用我们的 spec 格式生成 (含 magic + section 数组 + 假设的 section 内容)
+生成 (全部真实格式, 见 spec_pending_validation.md):
+  - test.torrent:   libtorrent 生成 (真实 infohash + piece hashes)
+  - test.bt.xltd:   4096 对齐位置镜像, 前 half_pieces 有数据 (零填充), 无头部
+  - test.xlbt.cfg:  magic=XDLCTX\\0\\0 + 随机区 + 头部字段 + 0x3c ASCII infohash
+                    + tag-02 key=1 (已下载 piece 数) + peer 缓存
+
+断言:
+  - 诊断模式: hit_rate ≥ 80%, passed=True
+  - 转换模式: fastresume 生成, pieces 位图 bit 数 == 下载 piece 数
 """
 import hashlib
 import json
 import struct
-import os
+import subprocess
 import sys
 from pathlib import Path
 
 import libtorrent as lt
 
-# stdout/stderr 统一 UTF-8,避免 Windows GBK 控制台乱码
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-# 输出目录固定在脚本所在目录下,与仓库自包含
 OUT = Path(__file__).resolve().parent / "e2e_out"
 OUT.mkdir(exist_ok=True, parents=True)
 
-# === 1. 生成一个最小 .torrent ===
-# 文件大小: 1MB, piece_length: 256KB → 4 pieces
-FILE_SIZE = 1 * 1024 * 1024
+# === 1. 源文件 + .torrent (2MB, 256KB piece → 8 pieces) ===
+FILE_SIZE = 2 * 1024 * 1024
 PIECE_LENGTH = 256 * 1024
-NUM_PIECES = FILE_SIZE // PIECE_LENGTH  # 4
+NUM_PIECES = FILE_SIZE // PIECE_LENGTH  # 8
+HALF = NUM_PIECES // 2                  # 前 4 个完成 (50%)
 
-# 生成"原始文件" - 用 piece index 作为内容区分
 file_path = OUT / "source_file.bin"
-with open(file_path, 'wb') as f:
+with open(file_path, "wb") as f:
     for i in range(NUM_PIECES):
-        # 每 piece 256KB,内容是 piece_index 重复
         f.write(struct.pack("<I", i) * (PIECE_LENGTH // 4))
 
-print(f"[1] 生成源文件: {file_path} ({FILE_SIZE} bytes)")
-
-# 用 libtorrent 创建 .torrent
 fs = lt.file_storage()
-# 以文件名为 torrent 内路径 (单文件种子),避免 Windows 绝对路径解析问题
 fs.add_file("source_file.bin", FILE_SIZE)
 fs.set_piece_length(PIECE_LENGTH)
-
 t = lt.create_torrent(fs)
-# 计算 piece hashes - 用 set_piece_hashes 自动计算
 lt.set_piece_hashes(t, str(file_path.parent))
-
-# 添加一些 tracker
-t.add_tracker("http://tracker.opentrackr.org:1337/announce")
-
-# 生成 .torrent 文件
-torrent_data = lt.bencode(t.generate())
 torrent_path = OUT / "test.torrent"
-torrent_path.write_bytes(torrent_data)
-print(f"[2] 生成 .torrent: {torrent_path}")
+torrent_path.write_bytes(lt.bencode(t.generate()))
 
-# === 2. 生成 .bt.xltd (sparse file,只填前 50% piece) ===
-# 模拟"下载到 50%"
-# 注意: libtorrent 可能用 16KB piece_length 而不是我们设的 256KB
-# 所以这里用 set_piece_hashes 之后的 piece_length
-# 先生成 .torrent 拿 piece_length, 然后用相同 piece_length 生成 .bt.xltd
-
-bt_xltd_path = OUT / "test.bt.xltd"
-
-# 真实 piece_length 在生成 .torrent 后才知道, 后面会重新生成 .bt.xltd
-# 先占位,等拿到 piece_length 后再生成
-print(f"[3] (delayed) .bt.xltd will be generated after .torrent")
-
-# === 3. 生成 .xlbt.cfg ===
-# 拿真实 info_hash + pieces_hash
 info = lt.torrent_info(str(torrent_path))
-info_hash = info.info_hash().to_bytes()  # sha1_hash → bytes
-print(f"  info_hash (from torrent): {info_hash.hex()}")
+info_hash_bytes = info.info_hashes().v1.to_bytes()
+info_hash_hex = info_hash_bytes.hex()
 
-# 从 .torrent 文件直接 bdecode 拿 pieces_hash (避开 libtorrent 不暴露的问题)
-torrent_raw = torrent_path.read_bytes()
-# 简单 bdecode
+raw = torrent_path.read_bytes()
 def bdecode(data, pos=0):
     c = chr(data[pos])
-    if c == 'd':
+    if c == "d":
         pos += 1; d = {}
-        while data[pos] != ord('e'):
-            k, pos = bdecode(data, pos)
-            v, pos = bdecode(data, pos)
-            d[k] = v
+        while data[pos] != ord("e"):
+            k, pos = bdecode(data, pos); v, pos = bdecode(data, pos); d[k] = v
         return d, pos + 1
-    elif c == 'l':
+    elif c == "l":
         pos += 1; l = []
-        while data[pos] != ord('e'):
-            v, pos = bdecode(data, pos)
-            l.append(v)
+        while data[pos] != ord("e"):
+            v, pos = bdecode(data, pos); l.append(v)
         return l, pos + 1
-    elif c == 'i':
-        end = data.index(b'e', pos)
-        return int(data[pos+1:end]), end + 1
-    elif c.isdigit():
-        colon = data.index(b':', pos)
-        n = int(data[pos:colon])
-        start = colon + 1
-        return data[start:start+n], start + n
+    elif c == "i":
+        end = data.index(b"e", pos); return int(data[pos + 1:end]), end + 1
+    else:
+        colon = data.index(b":", pos); n = int(data[pos:colon]); s = colon + 1
+        return data[s:s + n], s + n
+info_dict = bdecode(raw)[0][b"info"]
+real_plen = info_dict[b"piece length"]
+pieces_hash = info_dict[b"pieces"]
+real_n = len(pieces_hash) // 20
+print(f"[1] torrent: {real_n} pieces, piece_length={real_plen}, infohash={info_hash_hex}")
 
-parsed, _ = bdecode(torrent_raw)
-info_dict = parsed[b'info']
-pieces_hash = info_dict[b'pieces']
-print(f"  pieces_hash length: {len(pieces_hash)} bytes ({len(pieces_hash)//20} pieces)")
-print(f"  piece_length from torrent: {info_dict[b'piece length']}")
+# === 2. .bt.xltd: 4096 对齐位置镜像, 零填充空洞 (非 sparse, 与真实一致) ===
+xltd_path = OUT / "test.bt.xltd"
+aligned = (FILE_SIZE + 4095) // 4096 * 4096
+real_n = len(pieces_hash) // 20      # libtorrent 实际 piece 数 (可能非 PIECE_LENGTH)
+half_real = real_n // 2              # 前一半完成 (与 key=1 计数一致)
+with open(xltd_path, "wb") as f:
+    with open(file_path, "rb") as src:
+        f.write(src.read(half_real * real_plen))        # 前半真实数据
+        f.write(b"\x00" * (aligned - half_real * real_plen))  # 其余零填充
+print(f"[2] xltd: {xltd_path} size={aligned} (4096 对齐, 无头部; {half_real}/{real_n} pieces 完成)")
 
-# 现在有了真实 piece_length, 重新生成 .bt.xltd
-real_piece_length = info_dict[b'piece length']
-real_num_pieces = len(pieces_hash) // 20
-# 模拟"下载到 50%": 前 real_num_pieces/2 个 piece 有数据
-half_pieces = real_num_pieces // 2
-
-with open(bt_xltd_path, 'wb') as f:
-    # 前 half_pieces 个 piece 写真实数据 (从 source_file 读)
-    with open(file_path, 'rb') as src:
-        for i in range(half_pieces):
-            src.seek(i * real_piece_length)
-            piece_data = src.read(real_piece_length)
-            f.write(piece_data)
-    # 后半部分用 sparse hole
-    f.seek(FILE_SIZE - 1)
-    f.write(b'\x00')
-
-# 检查 sparse (Windows 无 st_blocks, 仅 Linux 可测)
-stat = bt_xltd_path.stat()
-actual = getattr(stat, "st_blocks", 0) * 512
-print(f"[3] 生成 .bt.xltd: {bt_xltd_path} (size={stat.st_size}, actual_blocks={actual})")
-
-# bitfield: 从 piece_length 算 num_pieces
-real_piece_length = info_dict[b'piece length']
-real_num_pieces = (FILE_SIZE + real_piece_length - 1) // real_piece_length
-# 模拟下载到 50%: 前 real_num_pieces/2 个完成
-real_bitfield_size = (real_num_pieces + 7) // 8
-bitfield = bytearray(real_bitfield_size)
-for i in range(real_num_pieces // 2):
-    byte_idx = i // 8
-    bit_idx = 7 - (i % 8)  # big-endian (标准 BT)
-    bitfield[byte_idx] |= (1 << bit_idx)
-bitfield = bytes(bitfield)
-print(f"  bitfield size: {len(bitfield)} bytes ({real_num_pieces} pieces)")
-
-# 构造 .xlbt.cfg (按 spec_pending_validation.md 推测的格式)
-header = b"XLBTCFG\x00"     # +0x00 magic
-header += struct.pack("<H", 0)  # +0x08 reserved1
-header += struct.pack("<H", 0)  # +0x0A reserved2
-header += struct.pack("<I", 0)  # +0x0C reserved3
-header += struct.pack("<Q", 1)  # +0x10 block_count
-header += struct.pack("<Q", 4096)  # +0x18 block_size
-header += struct.pack("<I", 5)   # +0x20 section_count
-header += struct.pack("<I", 0)   # +0x24 reserved4
-assert len(header) == 40
-
-# Section 数组 (每 entry 20B = 4+8+8)
-sections_data_start = 40 + 5 * 20  # 140
-sections_data = b""
-section_bodies = b""
-
-# Section 1: INFO_HASH (20 字节)
-sections_data += struct.pack("<I", 0x00000001)  # section_id (D 级猜测)
-sections_data += struct.pack("<Q", 20)            # size
-sections_data += struct.pack("<Q", sections_data_start + len(section_bodies))  # offset
-section_bodies += info_hash
-
-# Section 2: PIECES_HASH (4 × 20 = 80 字节)
-sections_data += struct.pack("<I", 0x00000002)
-sections_data += struct.pack("<Q", len(pieces_hash))
-sections_data += struct.pack("<Q", sections_data_start + len(section_bodies))
-section_bodies += pieces_hash
-
-# Section 3: BITFIELD (1 字节, 4 pieces / 8 = 1 byte)
-sections_data += struct.pack("<I", 0x00000003)
-sections_data += struct.pack("<Q", len(bitfield))
-sections_data += struct.pack("<Q", sections_data_start + len(section_bodies))
-section_bodies += bitfield
-
-# Section 4: FILE_INFO (JSON 简化)
-file_info = json.dumps({"name": "source_file.bin", "size": FILE_SIZE}).encode('utf-8')
-sections_data += struct.pack("<I", 0x00000004)
-sections_data += struct.pack("<Q", len(file_info))
-sections_data += struct.pack("<Q", sections_data_start + len(section_bodies))
-section_bodies += file_info
-
-# Section 5: GCID (20 字节)
-gcid = hashlib.sha1(hashlib.sha1(struct.pack("<I", 0) * (PIECE_LENGTH // 4)).digest() * NUM_PIECES).digest()
-sections_data += struct.pack("<I", 0x00000005)
-sections_data += struct.pack("<Q", 20)
-sections_data += struct.pack("<Q", sections_data_start + len(section_bodies))
-section_bodies += gcid
-
-cfg = header + sections_data + section_bodies
+# === 3. .xlbt.cfg: 真实格式 ===
+cfg = bytearray()
+cfg += b"XDLCTX\x00\x00"          # +0x00 magic (真实!)
+cfg += b"\x00" * 16                # +0x08 随机区
+cfg += struct.pack("<I", 30025)    # +0x18 观测值
+cfg += struct.pack("<I", 7)        # +0x1c 观测值
+cfg += struct.pack("<I", 0)        # +0x20
+cfg += struct.pack("<I", 4)        # +0x24
+cfg += struct.pack("<I", 0)        # +0x28
+cfg += struct.pack("<I", 28584)    # +0x2c 观测值
+cfg += struct.pack("<I", 4)        # +0x30
+cfg += struct.pack("<I", 262145)   # +0x34
+cfg += struct.pack("<I", 40)       # +0x38 infohash 长度
+cfg += info_hash_hex.upper().encode()  # +0x3c ASCII infohash
+assert len(cfg) == 0x64
+cfg += struct.pack("<HHI", 0x0002, 1, half_real)  # key=1 → 已下载 piece 数
+cfg += struct.pack("<HHI", 0x0002, 2, 0)          # key=2 → 0
+cfg += b"bt://127.0.0.1:51413"      # peer 缓存 (TLV 简化)
 cfg_path = OUT / "test.xlbt.cfg"
 cfg_path.write_bytes(cfg)
-print(f"[4] 生成 .xlbt.cfg: {cfg_path} ({len(cfg)} bytes)")
+print(f"[3] cfg: {cfg_path} ({len(cfg)} bytes, magic=XDLCTX)")
 
-# === 4. 运行转换器诊断模式 ===
-print("\n" + "="*60)
-print("[5] 运行转换器诊断模式")
-print("="*60)
-import subprocess
+# === 4. 诊断模式 ===
 converter = str(Path(__file__).resolve().parent / "xunlei_to_libtorrent_converter.py")
-result = subprocess.run(
-    [sys.executable, converter,
-     "--torrent", str(torrent_path),
-     "--bt-xltd", str(bt_xltd_path),
-     "--cfg", str(cfg_path),
-     "--output-dir", str(OUT / "diagnostic_out")],
-    capture_output=True, text=True
-)
-print(result.stdout[-3000:])
-if result.stderr:
-    print("STDERR:", result.stderr[-1000:])
+diag_out = OUT / "diagnostic_out"
+r = subprocess.run(
+    [sys.executable, converter, "--torrent", str(torrent_path), "--cfg", str(cfg_path),
+     "--bt-xltd", str(xltd_path), "--output-dir", str(diag_out)],
+    capture_output=True, text=True, encoding="utf-8", errors="replace")
+print("=== 诊断输出 ===")
+print(r.stdout[-2000:])
+if r.stderr:
+    print("STDERR:", r.stderr[-800:])
+diag = json.loads((diag_out / "conversion_diagnostic.json").read_text(encoding="utf-8"))
+assert diag["validation"]["passed"], "diagnostic passed 应为 True"
+assert diag["validation"]["hit_rate"] == 1.0, "合成样本命中率应为 100%"
 
-# === 5. 运行转换器转换模式 ===
-print("\n" + "="*60)
-print("[6] 运行转换器转换模式")
-print("="*60)
-result = subprocess.run(
-    [sys.executable, converter,
-     "--torrent", str(torrent_path),
-     "--bt-xltd", str(bt_xltd_path),
-     "--cfg", str(cfg_path),
-     "--output-dir", str(OUT / "convert_out"),
-     "--convert"],
-    capture_output=True, text=True
-)
-print(result.stdout[-3000:])
-if result.stderr:
-    print("STDERR:", result.stderr[-1000:])
+# === 5. 转换模式 ===
+conv_out = OUT / "convert_out"
+r = subprocess.run(
+    [sys.executable, converter, "--torrent", str(torrent_path), "--cfg", str(cfg_path),
+     "--bt-xltd", str(xltd_path), "--output-dir", str(conv_out), "--convert"],
+    capture_output=True, text=True, encoding="utf-8", errors="replace")
+print("=== 转换输出 ===")
+print(r.stdout[-1500:])
+if r.stderr:
+    print("STDERR:", r.stderr[-800:])
+report = json.loads((conv_out / "conversion_report.json").read_text(encoding="utf-8"))
+assert report["status"] == "OK", f"转换应 OK: {report.get('reason')}"
+assert report["pieces_done"] == half_real, f"位图应标记 {half_real} 个完成 piece"
 
-# 列出输出
-print("\n" + "="*60)
-print("[7] 输出文件清单")
-print("="*60)
+# === 6. libtorrent 回读 fastresume 校验 bitfield ===
+import libtorrent as lt2
+fr_path = conv_out / f"{lt.torrent_info(str(torrent_path)).name()}.fastresume"
+fr = lt2.bdecode(fr_path.read_bytes())
+bits = fr[b"pieces"]
+set_bits = sum(bin(b).count("1") for b in bits)
+assert set_bits == half_real, f"fastresume bitfield 应有 {half_real} bit, got {set_bits}"
+print(f"[OK] fastresume bitfield: {set_bits}/{real_n} pieces 完成, 与源一致")
+
+print("\n" + "=" * 60)
+print("E2E 通过: 真实格式合成样本 → 诊断+转换 全流程 OK")
+print("=" * 60)
 for p in sorted(OUT.rglob("*")):
     if p.is_file():
         print(f"  {p.relative_to(OUT)}  ({p.stat().st_size} bytes)")

@@ -1,0 +1,17 @@
+{
+  "cfg": {
+    "size": 32768,
+    "magic": "XDLCTX\u0000\u0000",
+    "magic_ok": false,
+    "reserved1": 19261,
+    "reserved2": 25619,
+    "reserved3": 846284729,
+    "block_count": 1616804660562685116,
+    "block_size": 30064801097,
+    "block_size_aligned": false,
+    "section_count": 0,
+    "reserved4": 4,
+    "sections": []
+  },
+  "xltd": null
+}

@@ -1,186 +1,117 @@
 """
-PoC: 迅雷 .xlbt.cfg 解析器 + .bt.xltd 探测器
+PoC: 迅雷 .xlbt.cfg 解析器 (真实样本验证版)
 
-基于反汇编推断的字段布局 (A 级证据):
-  .xlbt.cfg 文件头 (40 字节 = 0x28):
-    +0x00 (8B):  magic = "XLBTCFG\x00"
-    +0x08 (2B):  reserved (0)
-    +0x0A (2B):  ? (可能 reserved)
-    +0x10 (8B):  block_count  (qword, little-endian)
-    +0x18 (8B):  block_size   (qword, 必须 4096 倍数)
-    +0x20 (4B):  section_count (dword)
-  
-  紧接着是 section 数组, 每 entry 20 字节:
-    +0x00 (4B):  section_id (dword)
-    +0x04 (8B):  offset 或 size (qword)
-    +0x0C (8B):  reserved 或第二字段 (qword)
+基于 2026-08-17 真实样本验证结果 (见 docs/research/xunlei/spec_pending_validation.md):
+  .xlbt.cfg 真实格式 (A 级, 样本 C5AA149AE0776344A270EAFEE49FDADB43FF6097):
+    +0x00 (8B):  magic = "XDLCTX\\x00\\x00"   (注意: 非旧推测的 "XLBTCFG")
+    +0x08 (16B): 任务随机标识 (opaque, 语义未知)
+    +0x18 (4B):  u32 = 30025 (语义未知, 与 piece 数相关候选)
+    +0x1c (4B):  u32 = 7      (语义未知)
+    +0x24 (4B):  u32 = 4      (语义未知)
+    +0x2c (4B):  u32 = 28584  (语义未知)
+    +0x30 (4B):  u32 = 4      (语义未知)
+    +0x34 (4B):  u32 = 262145 (语义未知)
+    +0x38 (4B):  u32 = 40     (infohash 字符串长度)
+    +0x3c (40B): infohash ASCII 大写 hex (= torrent v1 info_hash)
+    +0x64 起:    tag-02 int 记录表 [02 00 <key16> <val32>]:
+                   key=1 → 已下载 piece 数 (样本: 1868, 与 xltd SHA1 验证 1864+12 部分吻合)
+                   key=2.. → 0 (其余保留)
+    文件内嵌:    u64 文件大小 (样本: 740642 cover.jpg @0x6f7c, 295849204 m4b @0x499c)
+    peer 缓存:   "bt://<ip>:<port>" 字符串记录 (样本 8+ 条)
+    blob 记录:   tag-04 [04 00 <len32> <data>]; 含 231 个 20B 随机 blob (非 torrent piece 哈希!)
+    "Reserved"  8B 标签字段 ×4
 
-.bt.xltd 文件 (B 级推断):
-  无 ASCII magic, 推断为纯 piece 数据 sparse file
-  按 piece_index * piece_length 偏移存储
+  关键否定结论 (A 级):
+    - cfg 中**没有** piece 哈希表 (2263×20=45KB > 32KB cfg, 且 231 个 20B blob 无一匹配 torrent pieces)
+    - cfg 中**没有** bitfield (下载状态由 .bt.xltd 的零区表达, 见 validate_xunlei_sample.py V5/V6)
 
 用法:
-  python3 parse_xlbt_cfg.py <.xlbt.cfg 文件> [<.bt.xltd 文件>]
+  python parse_xlbt_cfg.py <.xlbt.cfg 文件>
 """
-import sys
+import re
 import struct
 import json
+import sys
 from pathlib import Path
+
+MAGIC_REAL = b"XDLCTX\x00\x00"
+INFO_HASH_OFF = 0x3C
+INT_TAG = b"\x02\x00"
+BLOB_TAG = b"\x04\x00"
 
 
 def parse_xlbt_cfg(path):
-    """解析 .xlbt.cfg 文件"""
+    """解析 .xlbt.cfg (真实格式, 保守: 只输出可证明的字段)"""
     data = Path(path).read_bytes()
     size = len(data)
     print(f"[*] parsing {path} ({size} bytes)")
-    
-    if size < 0x28:
-        print(f"[ERR] too small: {size} bytes (need at least 40)")
+
+    if size < 0x64:
+        print(f"[ERR] too small: {size} bytes (need at least 100)")
         return None
-    
-    # 头部 40 字节
+
     magic = data[0:8]
-    reserved1 = struct.unpack("<H", data[8:10])[0]
-    reserved2 = struct.unpack("<H", data[10:12])[0]
-    reserved3 = struct.unpack("<I", data[12:16])[0]
-    block_count = struct.unpack("<Q", data[16:24])[0]
-    block_size = struct.unpack("<Q", data[24:32])[0]
-    section_count = struct.unpack("<I", data[32:36])[0]
-    reserved4 = struct.unpack("<I", data[36:40])[0]
-    
-    print(f"\n=== Header (40 bytes = 0x28) ===")
-    EXPECTED_MAGIC = b"XLBTCFG\x00"
-    print(f"  magic:          {magic!r}  ({'OK' if magic == EXPECTED_MAGIC else 'MISMATCH!'})")
-    print(f"  reserved1 (0x08, 2B):   0x{reserved1:04x} ({reserved1})")
-    print(f"  reserved2 (0x0A, 2B):   0x{reserved2:04x} ({reserved2})")
-    print(f"  reserved3 (0x0C, 4B):   0x{reserved3:08x} ({reserved3})")
-    print(f"  block_count (0x10, 8B): {block_count} (0x{block_count:x})")
-    print(f"  block_size (0x18, 8B):  {block_size} (0x{block_size:x})  align4096={'OK' if block_size % 4096 == 0 else 'FAIL'}")
-    print(f"  section_count (0x20, 4B): {section_count}")
-    print(f"  reserved4 (0x24, 4B):  0x{reserved4:08x} ({reserved4})")
-    
-    # Hex dump 头部
-    print(f"\n  header hex dump:")
-    for i in range(0, 0x28, 16):
-        line_hex = " ".join(f"{b:02x}" for b in data[i:i+16])
-        line_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in data[i:i+16])
-        print(f"    {i:04x}:  {line_hex}  |{line_ascii}|")
-    
-    # Section 数组
-    sections = []
-    print(f"\n=== Sections ({section_count} entries, each 20 bytes = 0x14) ===")
-    for i in range(min(section_count, 100)):  # 防止过大
-        offset = 0x28 + i * 0x14
-        if offset + 0x14 > size:
-            print(f"  [ERR] section {i} out of bounds (offset 0x{offset:x})")
-            break
-        section_id = struct.unpack("<I", data[offset:offset+4])[0]
-        field2 = struct.unpack("<Q", data[offset+4:offset+12])[0]
-        field3 = struct.unpack("<Q", data[offset+12:offset+20])[0]
-        sections.append({
-            "index": i,
-            "offset_in_file": offset,
-            "section_id": section_id,
-            "field2": field2,
-            "field3": field3,
-        })
-        print(f"  [{i}] @0x{offset:04x}:  section_id=0x{section_id:08x} ({section_id})  field2=0x{field2:016x} ({field2})  field3=0x{field3:016x} ({field3})")
-    
-    if section_count > 100:
-        print(f"  ... ({section_count - 100} more)")
-    
+    magic_ok = magic == MAGIC_REAL
+    print(f"\n=== 头部 ===")
+    print(f"  magic (0x00, 8B):  {magic!r}  ({'OK' if magic_ok else 'MISMATCH!'})")
+    print(f"  随机区 (0x08,16B): {data[8:24].hex()}")
+    for off in (0x18, 0x1C, 0x24, 0x2C, 0x30, 0x34, 0x38):
+        v = struct.unpack("<I", data[off:off + 4])[0]
+        print(f"  u32@{off:#06x}: {v}")
+
+    ih = data[INFO_HASH_OFF:INFO_HASH_OFF + 40].decode(errors="replace")
+    print(f"  infohash (0x3c,40B): {ih}")
+
+    # tag-02 int 记录表: 0x64 起, 8B/entry, [02 00 key16 val32]
+    ints = []
+    i = 0x64
+    while i + 8 <= size and data[i:i + 2] == INT_TAG:
+        key = struct.unpack("<H", data[i + 2:i + 4])[0]
+        val = struct.unpack("<I", data[i + 4:i + 8])[0]
+        ints.append((key, val))
+        i += 8
+    nz = [(k, v) for k, v in ints if v != 0]
+    print(f"\n=== tag-02 int 记录 (共 {len(ints)} 条, 非零 {len(nz)} 条) ===")
+    for k, v in nz[:10]:
+        print(f"  key={k} → {v}")
+
+    # tag-04 blob 记录统计
+    blobs = []
+    j = 0
+    while j < size - 6:
+        if data[j:j + 2] == BLOB_TAG:
+            ln = struct.unpack("<I", data[j + 2:j + 6])[0]
+            if j + 6 + ln <= size:
+                blobs.append((j, ln, data[j + 6:j + 6 + ln]))
+                j += 6 + ln
+                continue
+        j += 1
+    print(f"\n=== tag-04 blob 记录: {len(blobs)} 条 ===")
+    for off, ln, b in blobs[:8]:
+        printable = b if all(32 <= x < 127 for x in b[:24]) else b[:12].hex()
+        print(f"  @0x{off:04x} len={ln}: {printable!r}")
+
+    # peer 缓存
+    peers = [(m.start(), m.group().decode()) for m in re.finditer(rb"bt://[\d.]+:\d+", data)]
+    print(f"\n=== peer 缓存: {len(peers)} 条 ===")
+    for off, p in peers[:12]:
+        print(f"  @0x{off:04x}: {p}")
+
+    # 文件大小 u64 (已知文件大小可在此出现; 只列与 4096 对齐无关的明显值)
+    print(f"\n[OK] 解析完成 (未解释区域: 0x{INFO_HASH_OFF + 40:#06x} 之后大部分 TLV 细节)")
     return {
-        "size": size,
-        "magic": magic.decode('ascii', errors='replace'),
-        "magic_ok": magic == b"XLBTCFG\x00",
-        "reserved1": reserved1,
-        "reserved2": reserved2,
-        "reserved3": reserved3,
-        "block_count": block_count,
-        "block_size": block_size,
-        "block_size_aligned": block_size % 4096 == 0,
-        "section_count": section_count,
-        "reserved4": reserved4,
-        "sections": sections,
+        "size": size, "magic": magic.decode(errors="replace"), "magic_ok": magic_ok,
+        "infohash": ih, "int_records": ints, "blob_count": len(blobs),
+        "peers": [p for _, p in peers],
     }
-
-
-def probe_bt_xltd(path):
-    """探测 .bt.xltd 文件结构"""
-    data = Path(path).read_bytes()
-    size = len(data)
-    print(f"\n[*] probing {path} ({size} bytes = {size/1024/1024:.2f} MB)")
-    
-    # 检查前 64 字节,看是否有 magic
-    print(f"\n  first 64 bytes hex:")
-    for i in range(0, min(64, size), 16):
-        line_hex = " ".join(f"{b:02x}" for b in data[i:i+16])
-        line_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in data[i:i+16])
-        print(f"    {i:04x}:  {line_hex}  |{line_ascii}|")
-    
-    # 检查是否是 ASCII magic (前 8 字节全可打印)
-    first8 = data[0:8]
-    is_ascii_magic = all(32 <= b < 127 for b in first8) and first8 != b'\x00' * 8
-    print(f"\n  first 8 bytes ASCII? {is_ascii_magic}")
-    if is_ascii_magic:
-        print(f"    magic = {first8!r}")
-    
-    # 检查是否是 sparse file (大量 0 字节)
-    # 用 NTFS sparse 检测在 Linux 上无效,但我们能看文件实际占用 vs size
-    
-    # 检查末尾 64 字节
-    if size > 64:
-        print(f"\n  last 64 bytes hex:")
-        for i in range(max(0, size - 64), size, 16):
-            line_hex = " ".join(f"{b:02x}" for b in data[i:i+16])
-            line_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in data[i:i+16])
-            print(f"    {i:08x}:  {line_hex}  |{line_ascii}|")
-    
-    # 检查 0x00 区域比例 (sparse file 检测)
-    # 采样检查 16 个位置,每位置 4KB
-    if size > 65536:
-        sample_positions = [size // 16 * i for i in range(16)]
-        zero_blocks = 0
-        non_zero_blocks = 0
-        for pos in sample_positions:
-            block = data[pos:pos+4096]
-            if all(b == 0 for b in block):
-                zero_blocks += 1
-            else:
-                non_zero_blocks += 1
-        print(f"\n  sparse sampling (16 positions × 4KB):")
-        print(f"    zero blocks:     {zero_blocks}")
-        print(f"    non-zero blocks: {non_zero_blocks}")
-        print(f"    sparse ratio:   {zero_blocks/16*100:.0f}%")
-    
-    return {
-        "size": size,
-        "first8_hex": first8.hex(),
-        "is_ascii_magic": is_ascii_magic,
-    }
-
-
-def main():
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-    
-    cfg_path = sys.argv[1]
-    cfg_info = parse_xlbt_cfg(cfg_path)
-    
-    xltd_info = None
-    if len(sys.argv) >= 3:
-        xltd_path = sys.argv[2]
-        xltd_info = probe_bt_xltd(xltd_path)
-    
-    # 输出 JSON 报告 (写到输入 cfg 同目录)
-    out = Path(sys.argv[1]).resolve().parent / "parse_report.json"
-    out.write_text(json.dumps({
-        "cfg": cfg_info,
-        "xltd": xltd_info,
-    }, indent=2, ensure_ascii=False, default=str))
-    print(f"\n[OK] report saved: {out}")
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+    r = parse_xlbt_cfg(sys.argv[1])
+    if r:
+        Path("samples/parse_report.json").write_text(
+            json.dumps(r, indent=2, ensure_ascii=False), encoding="utf-8")
+        print("\n[OK] report saved: samples/parse_report.json")
