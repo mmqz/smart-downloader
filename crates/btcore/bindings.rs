@@ -242,6 +242,9 @@ unsafe extern "C" {
         port: u16,
     ) -> lt_err;
 }
+unsafe extern "C" {
+    pub fn lt_pause(s: *mut lt_session, ih: *const ::std::os::raw::c_char) -> lt_err;
+}
 pub const lt_alert_mask_LT_ALERT_TRACKER: lt_alert_mask = 1;
 pub const lt_alert_mask_LT_ALERT_PEER: lt_alert_mask = 2;
 pub const lt_alert_mask_LT_ALERT_ERROR: lt_alert_mask = 4;

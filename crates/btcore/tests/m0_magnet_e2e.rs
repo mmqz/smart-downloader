@@ -14,7 +14,7 @@ use smart_dl_btcore::Bare;
 fn real_magnet_makes_progress_within_60s() {
     let seeder = seed::TestSeeder::start();
     let save = seed::TempDir::new().expect("tempdir");
-    let session = Bare::new(save.path().to_str().unwrap(), "m0").expect("session");
+    let session = Bare::new(save.path(), "m0").expect("session");
 
     let ih = session.add_magnet(seeder.magnet(), &[]).expect("add_magnet");
     let (ip, port) = seeder.addr();

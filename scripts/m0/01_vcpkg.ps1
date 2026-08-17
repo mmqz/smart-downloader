@@ -20,7 +20,8 @@ Push-Location (Join-Path $root 'ffi')
 $code = $LASTEXITCODE
 Pop-Location
 if ($code -ne 0) { throw "vcpkg install failed: $code" }
-if (-not (Test-Path "$vk\installed\x64-windows\include\libtorrent\version.hpp")) {
+# manifest 模式的产物在 ffi/vcpkg_installed/x64-windows（不在 vcpkg 根 installed/）
+if (-not (Test-Path "$root\ffi\vcpkg_installed\x64-windows\include\libtorrent\version.hpp")) {
   throw "libtorrent headers missing after install"
 }
 Write-Output "[01_vcpkg] OK"

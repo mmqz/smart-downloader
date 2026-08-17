@@ -241,10 +241,14 @@ thunder:// 内容 = base64("AA" + 真实URL + "ZZ")
 
 ## 8. FFI 接口契约（v0.6：含 cxx spike 决策点 + alert 预算）
 
-### 8.1 绑定工具（D28，M0 spike 决出）
+### 8.1 绑定工具（D28，M0 spike 决出）— ✅ 已冻结：手写 C ABI
 
 - M0 用 **手写 C ABI** 与 **cxx** 各写 ~200 行最小内核（`lt_session_create` / `lt_pop_alerts` / `lt_status`），对比：构建复杂度、内存契约维护、异常/回调处理、alert 扁平化工作量
 - 决策倾向（以 spike 实测为准）：**手写 C ABI + bindgen**——契约定死可复用于其他语言/工具、alert 扁平化本就在 C++ 侧做一层、无 codegen 构建依赖；cxx 若证明能显著降低 lt_kernel.cpp 复杂度则改选
+- **spike 实测（2026-08-16，详见 `2026-08-16-ffi-spike.md`）→ 冻结 D14 = 手写 C ABI**：
+  - 行数比 320（A）/ 218（B）= 1.47 < 1.5，cxx 显著更少代码的判据不成立
+  - cxx 命中 libtorrent 特有坑 + 构建集成复杂度不成比例（5 轮 cxx 特有修复：bridge 不支持 `&CStr`/tuple、`&self`→const 方法、共享 struct 守卫宏、生成头路径、boost throw_exception shim）vs A 一次通过
+  - alert 扁平化两方案同样手写 C++，cxx 无优势
 
 ### 8.2 内存与所有权规则（D13）
 
@@ -411,6 +415,13 @@ Transferring：直链失效 → update_sources(≤3) → resubmit(≤2)
 ### 10.1 做种停止注记（M1 注意）
 
 libtorrent `seed_ratio/seed_time` 为 session 级且有版本 bug → 监听 `torrent_finished`（state_changed alert）→ 立即 `lt_pause(ih)`，Rust 置 `Completed → Stopped`。持续做种（配置开启）不做 pause。
+
+**M0 spike 实测结论（2026-08-17，libtorrent 2.1.1 / ABI100，`tests/m0_finished_pause.rs`）**：
+
+- 本地 seeder 完成下载 → 收到 `torrent_finished`（STATE 桶）→ 调 `lt_pause` → 收到 `torrent_paused`，**顺序恒定 fin < paused**（多次运行稳定）；paused 到达后 progress 保持 1.0（不再有数据传输）。
+- **同步点确认 = `torrent_paused` alert**（D19/D32 成立）：供 Stalled→Paused/FallbackProvider 的串行磁盘保证。
+- **ABI100 关键限制（写死）**：`flags_t` 已移除、`torrent_status::state` 不反映暂停（暂停后状态停在暂停前值，实测为 finished）；因此**暂停态由引擎层以 torrent_paused alert 维护，status() 不可作暂停依据**（lt.h 状态注释已更新）。
+- 实现依赖：ffi 侧新增 `lt_pause`（M0 补充，§8.3 既有签名）；STATE 桶 flattener 以 `a->type()` 区分 `torrent_finished`/`torrent_paused`/error 并写入 msg（**勿用 dynamic_cast**——vcpkg libtorrent 构建可能无 RTTI，实测 dynamic_cast 静默失效）。
 
 ### 10.2 v1 启发式路由
 

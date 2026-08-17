@@ -96,6 +96,48 @@ impl Bare {
         Ok(())
     }
 
+    /// 完成即停（做种停止，§10.1）；同步点 = torrent_paused alert（D19/D32）
+    pub fn pause(&self, ih: &str) -> Result<()> {
+        let i = CString::new(ih).map_err(|_| Error::Arg)?;
+        let code = unsafe { lt_pause(self.raw, i.as_ptr()) };
+        if code != lt_err_LT_OK {
+            return Err(Error::from(code));
+        }
+        Ok(())
+    }
+
+    /// 诊断辅助（M0 调试用）：设置 alert mask 并弹出全部 alert 消息
+    pub fn diag_set_mask(&self, mask: u32) -> Result<()> {
+        let code = unsafe { lt_set_alert_mask(self.raw, std::ptr::null(), mask) };
+        if code != lt_err_LT_OK {
+            return Err(Error::from(code));
+        }
+        Ok(())
+    }
+
+    pub fn diag_pop_alerts(&self) -> Result<Vec<String>> {
+        let mut buf = [lt_alert {
+            kind: 0,
+            ih: [0i8; 41],
+            msg: [0i8; 512],
+            at: 0,
+            resume_ready: 0,
+        }; 64];
+        let mut n: usize = 0;
+        let code = unsafe { lt_pop_alerts(self.raw, buf.as_mut_ptr(), buf.len(), &mut n) };
+        if code != lt_err_LT_OK {
+            return Err(Error::from(code));
+        }
+        let mut out = Vec::new();
+        for a in buf.iter().take(n) {
+            let msg = unsafe { CStr::from_ptr(a.msg.as_ptr()) }
+                .to_string_lossy()
+                .into_owned();
+            out.push(format!("kind={} msg={}", a.kind, msg));
+        }
+        Ok(out)
+    }
+
     /// (progress, state)；state 0 下载 1 完成 2 暂停 3 错误 4 元数据获取中
     pub fn status(&self, ih: &str) -> Result<(f32, i32)> {
         let i = CString::new(ih).map_err(|_| Error::Arg)?;
@@ -115,6 +157,27 @@ impl Bare {
             return Err(Error::from(code));
         }
         Ok((st.progress, st.state))
+    }
+
+    /// 诊断辅助（M0 调试用）：(metadata_received, num_peers, num_seeds)
+    pub fn status_extra(&self, ih: &str) -> Result<(i32, i32, i32)> {
+        let i = CString::new(ih).map_err(|_| Error::Arg)?;
+        let mut st = lt_torrent_status {
+            state: 0,
+            progress: 0.0,
+            downloaded: 0,
+            total: 0,
+            down_rate: 0,
+            up_rate: 0,
+            num_peers: 0,
+            num_seeds: 0,
+            metadata_received: 0,
+        };
+        let code = unsafe { lt_status(self.raw, i.as_ptr(), &mut st) };
+        if code != lt_err_LT_OK {
+            return Err(Error::from(code));
+        }
+        Ok((st.metadata_received, st.num_peers, st.num_seeds))
     }
 }
 

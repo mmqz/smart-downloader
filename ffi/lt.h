@@ -28,7 +28,9 @@ lt_err lt_session_new(const char* save_path, const char* session_id, lt_session*
 void   lt_session_free(lt_session* s);
 
 typedef struct {
-    int     state;             /* 0 下载 1 完成 2 暂停 3 错误 4 元数据获取中 */
+    int     state;             /* libtorrent torrent_status::state；0 下载 1 完成 3 错误 4 元数据获取中。
+                                  ABI100 无 paused 状态/无 flags_t：暂停以后续 torrent_paused alert 为同步点
+                                  （状态停在暂停前值），暂停态由引擎层维护（§10.1 验证结论）。 */
     float   progress;          /* 0..1（已下载/总字节，metadata 前恒 0） */
     int64_t downloaded, total, down_rate, up_rate;
     int     num_peers, num_seeds;   /* 已连接数（F2） */
@@ -40,6 +42,10 @@ lt_err lt_status(lt_session* s, const char* ih, lt_torrent_status* out);
 
 /* M0 补充：本地测试用 peer 注入（本地 seeder 直连，无需 tracker） */
 lt_err lt_add_peer(lt_session* s, const char* ih, const char* ip, uint16_t port);
+
+/* M0 补充：完成即停（做种停止路径，§10.1 / spike 附带验证项）；
+ * 同步点 = torrent_paused alert（D19/D32）。 */
+lt_err lt_pause(lt_session* s, const char* ih);
 
 /* —— M0/spike：alert 队列（D31 预算 ≤12 种；扁平化值拷贝，所有权归 wrapper；溢出计数）—— */
 typedef enum {

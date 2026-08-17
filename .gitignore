@@ -3,5 +3,8 @@
 /ffi/build/
 /ffi/vcpkg_installed/
 /spike/target/
+/spike/cxx/target/
+/ffi/src/repro.cpp
+/ffi/src/repro.exe
 /tools/xunlei-migrate/__pycache__/
 /tools/xunlei-migrate/e2e_out/

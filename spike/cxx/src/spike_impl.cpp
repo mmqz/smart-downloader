@@ -1,6 +1,6 @@
 // spike/cxx/src/spike_impl.cpp — approach B 实现（cxx 自动处理异常边界与 UniquePtr 生命周期）
 #include "spike_impl.hpp"
-#include "lib.rs.h"
+#include "ffi-cxx-spike/src/lib.rs.h"
 
 #include <libtorrent/session.hpp>
 #include <libtorrent/session_params.hpp>
@@ -16,6 +16,15 @@
 #include <deque>
 #include <mutex>
 #include <vector>
+
+// spike-only shim: vcpkg boost 1.91 以 header-only system/asio 构建,
+// 但 asio 内联路径引用非模板的二参 throw_exception 外部符号。spike 提供
+// out-of-line 定义以便链接;生产路径 (ffi/CMakeLists) 无此问题。
+namespace boost {
+BOOST_NORETURN void throw_exception(std::exception const& e, boost::source_location const&) {
+    throw e;
+}
+} // namespace boost
 
 struct Session::Impl {
     lt::session ses;
@@ -43,18 +52,19 @@ int map_kind(const lt::alert* a) {
         case lt::torrent_error_alert::alert_type:     return 16;   // LT_ALERT_STATE
         case lt::save_resume_data_alert::alert_type:  return 32;   // LT_ALERT_RESUME
         case lt::tracker_error_alert::alert_type:     return 1;    // LT_ALERT_TRACKER
-        case lt::peer_connected_alert::alert_type:
+        case lt::peer_connect_alert::alert_type:
         case lt::peer_disconnected_alert::alert_type: return 2;    // LT_ALERT_PEER
         default: return 0;
     }
 }
 std::string ih_hex(const lt::torrent_handle& h) {
-    if (!h.is_valid() || !h.info_hash().has_v1()) return {};
+    if (!h.is_valid() || !h.info_hashes().has_v1()) return {};
     static const char* hex = "0123456789abcdef";
-    const lt::sha1_hash& v1 = h.info_hash().v1;
+    const lt::sha1_hash& v1 = h.info_hashes().v1;
+    const char* d = v1.data();
     std::string out(40, '0');
     for (int i = 0; i < 20; ++i) {
-        const unsigned char b = static_cast<unsigned char>(v1[i]);
+        const unsigned char b = static_cast<unsigned char>(d[i]);
         out[i * 2] = hex[b >> 4];
         out[i * 2 + 1] = hex[b & 0xF];
     }
@@ -65,24 +75,31 @@ std::string ih_hex(const lt::torrent_handle& h) {
 Session::Session(std::string save_path) : impl_(std::make_unique<Impl>(std::move(save_path), nullptr)) {}
 Session::~Session() = default;
 
-rust::String Session::add_magnet(const char* magnet) {
-    lt::add_torrent_params p = lt::parse_magnet_uri(magnet); // 非法输入抛异常 → cxx 转 Err
+rust::String Session::add_magnet(rust::Str magnet) const {
+    // 非法输入抛异常 → cxx 转 Err
+    const std::string m(magnet.data(), magnet.size());
+    lt::add_torrent_params p = lt::parse_magnet_uri(m);
     p.save_path = impl_->save_path;
-    const lt::torrent_handle h = impl_->ses.add_torrent(p);
+    lt::error_code ec;
+    const lt::torrent_handle h = impl_->ses.add_torrent(p, ec);
+    if (ec) throw std::runtime_error(ec.message());
     const std::string ih = ih_hex(h);
     return rust::String(ih);
 }
 
-std::pair<float, std::int32_t> Session::status(rust::Str ih) {
+Status Session::status(rust::Str ih) const {
     // 简化：spike 仅验证调用链；真实解析在 M1 统一实现
-    return std::make_pair(0.0f, 0);
+    Status s;
+    s.progress = 0.0f;
+    s.state = 0;
+    return s;
 }
 
-void Session::set_session_mask(std::uint32_t mask) { impl_->mask = mask; }
+void Session::set_session_mask(std::uint32_t mask) const { impl_->mask = mask; }
 
-rust::Vec<Alert> Session::pop_alerts() {
+rust::Vec<Alert> Session::pop_alerts() const {
     std::vector<lt::alert*> alerts;
-    impl_->ses.pop_alerts(alerts);
+    impl_->ses.pop_alerts(&alerts); // 2.x：指针形参
     rust::Vec<Alert> out;
     for (const lt::alert* a : alerts) {
         const int kind = map_kind(a);
@@ -99,6 +116,7 @@ rust::Vec<Alert> Session::pop_alerts() {
     return out;
 }
 
-std::unique_ptr<Session> new_session(const char* save_path, const char* session_id) {
-    return std::make_unique<Session>(std::string(save_path));
+std::unique_ptr<Session> new_session(rust::Str save_path, rust::Str /*session_id*/) {
+    const std::string sp(save_path.data(), save_path.size());
+    return std::make_unique<Session>(sp);
 }

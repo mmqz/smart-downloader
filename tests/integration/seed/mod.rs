@@ -12,6 +12,7 @@ pub struct TestSeeder {
     child: Child,
     magnet: String,
     port: u16,
+    dir: TempDir,
 }
 
 pub struct TempDir {
@@ -70,45 +71,50 @@ fn pick_free_port() -> u16 {
 
 impl TestSeeder {
     /// 启动 seed_main；要求 02_build.ps1 已产出 seed_main.exe（M0 出口前置）
+    /// stdout 重定向到临时文件（避免管道不被排空导致 seed_main 阻塞自身 session，
+    /// 令 peer 连接全部断开——M0 e2e 调试实测）。
     pub fn start() -> Self {
         let exe = seed_main_path().expect("seed_main.exe 未构建：先跑 scripts/m0/02_build.ps1");
         let port = pick_free_port();
         let dir = TempDir::new().expect("tempdir");
         let save: PathBuf = dir.path().to_path_buf(); // 由 seeder 写入 2MB 测试文件
+        let log = dir.path().join("seed.log");
+        let logf = std::fs::File::create(&log).expect("create seed.log");
 
         let mut child = Command::new(exe)
             .arg(port.to_string())
             .arg(&save)
-            .stdout(Stdio::piped())
+            .stdout(Stdio::from(logf))
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn seed_main");
 
-        // 30s 内读首行 "SEED <magnet> PORT <port>"
-        let stdout = child.stdout.take().expect("seed_main stdout");
-        let mut reader = BufReader::new(stdout);
+        // 30s 内从文件读到 "SEED <magnet> PORT <port>"
         let deadline = Instant::now() + Duration::from_secs(30);
-        let mut line = String::new();
         loop {
-            line.clear();
-            let read = reader.read_line(&mut line).expect("read seed line");
-            if read == 0 {
-                break;
+            if let Ok(f) = std::fs::File::open(&log) {
+                let mut lines = BufReader::new(f).lines();
+                while let Some(Ok(line)) = lines.next() {
+                    let t = line.trim().to_string();
+                    if t.starts_with("SEED ") {
+                        let mut parts = t.split_whitespace();
+                        parts.next(); // SEED
+                        let magnet = parts.next().expect("magnet").to_string();
+                        parts.next(); // PORT
+                        let p: u16 = parts.next().expect("port").parse().expect("port num");
+                        assert_eq!(p, port, "seed_main 报告的端口与请求不一致");
+                        return Self { child, magnet, port, dir };
+                    }
+                }
             }
-            let t = line.trim().to_string();
-            if t.starts_with("SEED ") {
-                let mut parts = t.split_whitespace();
-                parts.next(); // SEED
-                let magnet = parts.next().expect("magnet").to_string();
-                parts.next(); // PORT
-                let p: u16 = parts.next().expect("port").parse().expect("port num");
-                assert_eq!(p, port, "seed_main 报告的端口与请求不一致");
-                return Self { child, magnet, port };
+            if child.try_wait().ok().flatten().is_some() {
+                let _ = child.kill();
+                let tail = std::fs::read_to_string(&log).unwrap_or_default();
+                panic!("seed_main 提前退出: {}", tail);
             }
-            assert!(Instant::now() < deadline, "seed_main 30s 内未输出 SEED 行: {:?}", t);
+            assert!(Instant::now() < deadline, "seed_main 30s 内未输出 SEED 行");
+            std::thread::sleep(Duration::from_millis(200));
         }
-        let _ = child.kill();
-        panic!("seed_main 提前退出，未输出 SEED 行");
     }
 
     pub fn magnet(&self) -> &str {
@@ -117,6 +123,10 @@ impl TestSeeder {
     /// (ip, port) 供 lt_add_peer 直连注入
     pub fn addr(&self) -> (String, u16) {
         (SocketAddr::from((Ipv4Addr::LOCALHOST, self.port)).ip().to_string(), self.port)
+    }
+    /// seeder 诊断输出（seed_main 打印的 SEED-STATUS/SEED-ALERT 行）
+    pub fn log(&self) -> String {
+        std::fs::read_to_string(self.dir.path().join("seed.log")).unwrap_or_default()
     }
 }
 
