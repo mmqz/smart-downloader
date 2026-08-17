@@ -34,6 +34,15 @@ pub const WCHAR_MIN: u32 = 0;
 pub const WCHAR_MAX: u32 = 65535;
 pub const WINT_MIN: u32 = 0;
 pub const WINT_MAX: u32 = 65535;
+pub const LT_PEER_SEED: u32 = 1;
+pub const LT_PEER_UPLOADER: u32 = 2;
+pub const LT_PEER_INTERESTED: u32 = 4;
+pub const LT_PEER_CHOKED: u32 = 8;
+pub const LT_PEER_REMOTE_CHOKED: u32 = 16;
+pub const LT_PEER_SNUBBED: u32 = 32;
+pub const LT_PEER_CONNECTING: u32 = 64;
+pub const LT_PEER_LOCAL: u32 = 128;
+pub const LT_PEER_UTP: u32 = 256;
 pub type va_list = *mut ::std::os::raw::c_char;
 unsafe extern "C" {
     pub fn __va_start(arg1: *mut *mut ::std::os::raw::c_char, ...);
@@ -183,6 +192,53 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn lt_session_free(s: *mut lt_session);
 }
+unsafe extern "C" {
+    pub fn lt_err_str(
+        s: *mut lt_session,
+        buf: *mut ::std::os::raw::c_char,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_add_magnet(
+        s: *mut lt_session,
+        magnet: *const ::std::os::raw::c_char,
+        web_seeds: *mut *const ::std::os::raw::c_char,
+        ih_out: *mut ::std::os::raw::c_char,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_add_torrent_file(
+        s: *mut lt_session,
+        meta: *const u8,
+        len: usize,
+        web_seeds: *mut *const ::std::os::raw::c_char,
+        ih_out: *mut ::std::os::raw::c_char,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_add_torrent_resume(
+        s: *mut lt_session,
+        resume_data: *const u8,
+        len: usize,
+        web_seeds: *mut *const ::std::os::raw::c_char,
+        ih_out: *mut ::std::os::raw::c_char,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_pause(s: *mut lt_session, ih: *const ::std::os::raw::c_char) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_resume(s: *mut lt_session, ih: *const ::std::os::raw::c_char) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_remove(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        delete_data: ::std::os::raw::c_int,
+    ) -> lt_err;
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct lt_torrent_status {
@@ -220,14 +276,6 @@ const _: () = {
         [::std::mem::offset_of!(lt_torrent_status, metadata_received) - 48usize];
 };
 unsafe extern "C" {
-    pub fn lt_add_magnet(
-        s: *mut lt_session,
-        magnet: *const ::std::os::raw::c_char,
-        web_seeds: *mut *const ::std::os::raw::c_char,
-        ih_out: *mut ::std::os::raw::c_char,
-    ) -> lt_err;
-}
-unsafe extern "C" {
     pub fn lt_status(
         s: *mut lt_session,
         ih: *const ::std::os::raw::c_char,
@@ -235,15 +283,80 @@ unsafe extern "C" {
     ) -> lt_err;
 }
 unsafe extern "C" {
-    pub fn lt_add_peer(
+    pub fn lt_piece_count(
         s: *mut lt_session,
         ih: *const ::std::os::raw::c_char,
-        ip: *const ::std::os::raw::c_char,
-        port: u16,
+        out: *mut ::std::os::raw::c_int,
     ) -> lt_err;
 }
 unsafe extern "C" {
-    pub fn lt_pause(s: *mut lt_session, ih: *const ::std::os::raw::c_char) -> lt_err;
+    pub fn lt_bitfield(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_file_count(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        out: *mut ::std::os::raw::c_int,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_file_progress(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        done_arr: *mut i64,
+        size_arr: *mut i64,
+        n: ::std::os::raw::c_int,
+    ) -> lt_err;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct lt_peer {
+    pub ip: [::std::os::raw::c_char; 64usize],
+    pub port: u16,
+    pub peer_id: [::std::os::raw::c_char; 64usize],
+    pub client: [::std::os::raw::c_char; 128usize],
+    pub progress_ppm: u32,
+    pub down_rate: i64,
+    pub up_rate: i64,
+    pub total_download: i64,
+    pub total_upload: i64,
+    pub last_active_sec: i64,
+    pub flags: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of lt_peer"][::std::mem::size_of::<lt_peer>() - 312usize];
+    ["Alignment of lt_peer"][::std::mem::align_of::<lt_peer>() - 8usize];
+    ["Offset of field: lt_peer::ip"][::std::mem::offset_of!(lt_peer, ip) - 0usize];
+    ["Offset of field: lt_peer::port"][::std::mem::offset_of!(lt_peer, port) - 64usize];
+    ["Offset of field: lt_peer::peer_id"][::std::mem::offset_of!(lt_peer, peer_id) - 66usize];
+    ["Offset of field: lt_peer::client"][::std::mem::offset_of!(lt_peer, client) - 130usize];
+    ["Offset of field: lt_peer::progress_ppm"]
+        [::std::mem::offset_of!(lt_peer, progress_ppm) - 260usize];
+    ["Offset of field: lt_peer::down_rate"][::std::mem::offset_of!(lt_peer, down_rate) - 264usize];
+    ["Offset of field: lt_peer::up_rate"][::std::mem::offset_of!(lt_peer, up_rate) - 272usize];
+    ["Offset of field: lt_peer::total_download"]
+        [::std::mem::offset_of!(lt_peer, total_download) - 280usize];
+    ["Offset of field: lt_peer::total_upload"]
+        [::std::mem::offset_of!(lt_peer, total_upload) - 288usize];
+    ["Offset of field: lt_peer::last_active_sec"]
+        [::std::mem::offset_of!(lt_peer, last_active_sec) - 296usize];
+    ["Offset of field: lt_peer::flags"][::std::mem::offset_of!(lt_peer, flags) - 304usize];
+};
+unsafe extern "C" {
+    pub fn lt_peers(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        buf: *mut lt_peer,
+        cap: usize,
+        out_count: *mut usize,
+    ) -> lt_err;
 }
 pub const lt_alert_mask_LT_ALERT_TRACKER: lt_alert_mask = 1;
 pub const lt_alert_mask_LT_ALERT_PEER: lt_alert_mask = 2;
@@ -290,6 +403,73 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn lt_alerts_dropped(s: *mut lt_session, out: *mut u32) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_request_save_resume(s: *mut lt_session, ih: *const ::std::os::raw::c_char) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_take_resume_data(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_ban_peer(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        ip: *const ::std::os::raw::c_char,
+        port: u16,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_add_peer(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        ip: *const ::std::os::raw::c_char,
+        port: u16,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_add_url_seed(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        url: *const ::std::os::raw::c_char,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_add_tracker(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        url: *const ::std::os::raw::c_char,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_set_sequential(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        on: ::std::os::raw::c_int,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_set_limits(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        down_limit: i64,
+        up_limit: i64,
+    ) -> lt_err;
+}
+unsafe extern "C" {
+    pub fn lt_read_piece(
+        s: *mut lt_session,
+        ih: *const ::std::os::raw::c_char,
+        idx: ::std::os::raw::c_int,
+        buf: *mut u8,
+        buflen: usize,
+        out_len: *mut usize,
+    ) -> lt_err;
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

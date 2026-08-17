@@ -23,11 +23,10 @@ fn real_magnet_makes_progress_within_60s() {
         .expect("add_peer(seeder)");
 
     let deadline = Instant::now() + Duration::from_secs(60);
-    let mut progress = 0.0f32;
     loop {
         let (p, _state) = session.status(&ih).expect("status");
-        progress = p;
         if p > 0.0 {
+            assert!(p > 0.0, "progress must exceed 0");
             break;
         }
         assert!(
@@ -38,5 +37,4 @@ fn real_magnet_makes_progress_within_60s() {
         );
         std::thread::sleep(Duration::from_millis(500));
     }
-    assert!(progress > 0.0, "progress must exceed 0");
 }

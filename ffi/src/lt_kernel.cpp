@@ -13,13 +13,25 @@
 #include <libtorrent/magnet_uri.hpp>
 #include <libtorrent/torrent_handle.hpp>
 #include <libtorrent/torrent_status.hpp>
+#include <libtorrent/torrent_info.hpp>
+#include <libtorrent/file_storage.hpp>
+#include <libtorrent/announce_entry.hpp>
+#include <libtorrent/peer_info.hpp>
+#include <libtorrent/read_resume_data.hpp>
+#include <libtorrent/write_resume_data.hpp>
 #include <libtorrent/alert.hpp>
 #include <libtorrent/alert_types.hpp>
+#include <libtorrent/entry.hpp>
+#include <libtorrent/bencode.hpp>
+#include <libtorrent/bdecode.hpp>
+#include <libtorrent/error_code.hpp>
+#include <libtorrent/span.hpp>
 
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -35,6 +47,12 @@ struct lt_session {
     std::deque<lt_alert> ring;
     uint32_t dropped = 0;
     uint32_t mask = 0;
+    std::string last_err;
+    // resume 异步流（D16）：request_save_resume → save_resume_data_alert →
+    //   drain 时 bencode 存此 map → lt_take_resume_data 拷贝出（cap 不足则 LT_ERR_BUFFER_TOO_SMALL）
+    std::map<std::string, std::vector<char>> resume_map;
+    // read_piece 轮询（v2）：lt_read_piece 触发 async read_piece；drain 时存 "ih:idx" → 数据
+    std::map<std::string, std::vector<char>> read_map;
 
     explicit lt_session(const char* path)
         : ses(lt::session_params())
@@ -48,6 +66,10 @@ struct lt_session {
         sp.set_bool(lt::settings_pack::enable_dht, false);
         sp.set_bool(lt::settings_pack::enable_upnp, false);
         sp.set_bool(lt::settings_pack::enable_natpmp, false);
+        // v1 内核默认纯 TCP：uTP 首连超时（~2s）+ 随机重试会让 e2e 时序抖动
+        //（M1 peers 排查：uTP SYN 超时后 TCP 重连，快照窗口不确定）。uTP 留待后续策略开关。
+        sp.set_bool(lt::settings_pack::enable_incoming_utp, false);
+        sp.set_bool(lt::settings_pack::enable_outgoing_utp, false);
         ses.apply_settings(sp);
     }
 };
@@ -114,6 +136,30 @@ void drain_session(lt_session* s) {
     if (alerts.empty()) return;
     std::lock_guard<std::mutex> lk(s->mtx);
     for (const lt::alert* a : alerts) {
+        // 异步数据落地（不产生 alert）：resume bencode / read_piece 数据
+        // type() + static_cast：不依赖 RTTI（vcpkg libtorrent 可能无 RTTI）
+        if (a->type() == lt::save_resume_data_alert::alert_type) {
+            const auto* ra = static_cast<const lt::save_resume_data_alert*>(a);
+            if (ra->handle.is_valid() && ra->handle.info_hashes().has_v1()) {
+                char ih[41];
+                hex_encode_v1(ra->handle.info_hashes().v1, ih);
+                std::vector<char> buf;
+                // ABI>=2：resume 数据在 params；resume_data 成员仅 ABI==1 可见
+                const lt::entry e = lt::write_resume_data(ra->params);
+                lt::bencode(std::back_inserter(buf), e);
+                s->resume_map[ih] = std::move(buf);
+            }
+        } else if (a->type() == lt::read_piece_alert::alert_type) {
+            const auto* rp = static_cast<const lt::read_piece_alert*>(a);
+            if (rp->handle.is_valid() && rp->handle.info_hashes().has_v1()
+                && rp->size > 0 && rp->buffer) {
+                char ih[41];
+                hex_encode_v1(rp->handle.info_hashes().v1, ih);
+                const std::string key = std::string(ih) + ":"
+                    + std::to_string(static_cast<int>(rp->piece));
+                s->read_map[key].assign(rp->buffer.get(), rp->buffer.get() + rp->size);
+            }
+        }
         const int kind = map_alert_kind(a);
         if (kind == 0 || ((s->mask & kind) == 0)) { ++s->dropped; continue; }
         lt_alert fa{};
@@ -128,11 +174,17 @@ void drain_session(lt_session* s) {
             m = "torrent finished";
         } else if (a->type() == lt::torrent_paused_alert::alert_type) {
             m = "torrent paused";
+        } else if (a->type() == lt::save_resume_data_alert::alert_type) {
+            m = "resume ready";
+        } else if (a->type() == lt::save_resume_data_failed_alert::alert_type) {
+            m = "resume failed";
+        } else if (a->type() == lt::tracker_announce_alert::alert_type) {
+            m = "tracker announce";
         }
         std::strncpy(fa.msg, m.c_str(), sizeof(fa.msg) - 1);
         fa.msg[sizeof(fa.msg) - 1] = '\0';
-        if (dynamic_cast<const lt::save_resume_data_alert*>(a) != nullptr) {
-            fa.resume_ready = 1; // bencode data fetched via lt_take_resume_data (M1)
+        if (a->type() == lt::save_resume_data_alert::alert_type) {
+            fa.resume_ready = 1; // bencode data fetched via lt_take_resume_data
         }
         if (s->ring.size() >= kAlertRingCap) { s->ring.pop_front(); ++s->dropped; }
         s->ring.push_back(fa);
@@ -142,6 +194,8 @@ void drain_session(lt_session* s) {
 } // namespace
 
 extern "C" {
+
+static void set_err(lt_session* s, std::string m);
 
 lt_err lt_session_new(const char* save_path, const char* /*session_id*/, lt_session** out) {
     if (!out) return LT_ERR_ARG;
@@ -181,13 +235,14 @@ lt_err lt_add_peer(lt_session* s, const char* ih, const char* ip, uint16_t port)
     if (!s || !ih || !ip) return LT_ERR_ARG;
     try {
         const lt::torrent_handle h = find_handle(s, ih);
-        if (!h.is_valid()) return LT_ERR_NOT_FOUND;
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
         lt::error_code ec;
         lt::tcp::endpoint ep(lt::make_address(ip, ec), port);
         if (ec) return LT_ERR_ARG;
         h.connect_peer(ep); // 2.x method name
         return LT_OK;
     } catch (...) {
+        set_err(s, "engine error");
         return LT_ERR_ENGINE;
     }
 }
@@ -196,10 +251,11 @@ lt_err lt_pause(lt_session* s, const char* ih) {
     if (!s || !ih) return LT_ERR_ARG;
     try {
         const lt::torrent_handle h = find_handle(s, ih);
-        if (!h.is_valid()) return LT_ERR_NOT_FOUND;
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
         h.pause(); // 完成即停；torrent_paused_alert 为同步点（D19/D32）
         return LT_OK;
     } catch (...) {
+        set_err(s, "engine error");
         return LT_ERR_ENGINE;
     }
 }
@@ -208,7 +264,7 @@ lt_err lt_status(lt_session* s, const char* ih, lt_torrent_status* out) {
     if (!s || !ih || !out) return LT_ERR_ARG;
     try {
         const lt::torrent_handle h = find_handle(s, ih);
-        if (!h.is_valid()) return LT_ERR_NOT_FOUND;
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
         const lt::torrent_status st = h.status();
         out->metadata_received = st.has_metadata ? 1 : 0;
         // ABI=100 excludes paused bool/flag_paused; paused handled via alert in M1.
@@ -269,6 +325,356 @@ lt_err lt_alerts_dropped(lt_session* s, uint32_t* out) {
     std::lock_guard<std::mutex> lk(s->mtx);
     *out = s->dropped;
     return LT_OK;
+}
+
+// —— M1 全量（§8.3）——
+
+static void set_err(lt_session* s, std::string m) {
+    if (s && s->last_err != m) s->last_err = std::move(m);
+}
+
+static lt_err fill_ih(lt_session* s, const lt::add_torrent_params& p, const char** web_seeds, char* ih_out) {
+    try {
+        lt::torrent_handle h;
+        if (p.ti) {
+            lt::error_code ec;
+            h = s->ses.add_torrent(p, ec);
+            if (ec) { set_err(s, "add_torrent: " + ec.message()); return LT_ERR_IO; }
+        } else {
+            h = s->ses.add_torrent(p);
+        }
+        (void)web_seeds;
+        const lt::info_hash_t ih = h.info_hashes();
+        if (!ih.has_v1()) { set_err(s, "v2-only torrent unsupported"); return LT_ERR_ENGINE; }
+        hex_encode_v1(ih.v1, ih_out);
+        return LT_OK;
+    } catch (...) {
+        set_err(s, "engine error");
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_err_str(lt_session* s, char* buf, size_t cap, size_t* out_len) {
+    if (!s || !buf || !out_len) return LT_ERR_ARG;
+    const std::string m = s->last_err.empty() ? "ok" : s->last_err;
+    if (cap < m.size() + 1) { *out_len = m.size() + 1; return LT_ERR_BUFFER_TOO_SMALL; }
+    std::memcpy(buf, m.c_str(), m.size() + 1);
+    *out_len = m.size(); // 不含 NUL
+    return LT_OK;
+}
+
+static void set_web_seeds(lt::add_torrent_params& p, const char** web_seeds) {
+    if (web_seeds) {
+        for (const char** ws = web_seeds; *ws != nullptr; ++ws) {
+            p.url_seeds.emplace_back(*ws);
+        }
+    }
+}
+
+lt_err lt_add_torrent_file(lt_session* s, const uint8_t* meta, size_t len, const char** web_seeds, char* ih_out) {
+    if (!s || !meta || !len || !ih_out) return LT_ERR_ARG;
+    try {
+        lt::error_code ec;
+        lt::bdecode_node node = lt::bdecode(
+            lt::span<const char>(reinterpret_cast<const char*>(meta), len), ec);
+        if (ec) { set_err(s, "torrent bdecode: " + ec.message()); return LT_ERR_IO; }
+        // ABI100：旧 ctor（bdecode_node 全文件/from_span）编译期移除；
+        // 新 API = info-section 构造（from_info_section_t 标签）
+        const lt::bdecode_node info = node.dict_find("info");
+        if (!info) { set_err(s, "torrent parse: no info section"); return LT_ERR_IO; }
+        auto ti = std::make_shared<lt::torrent_info>(
+            info, ec, lt::load_torrent_limits{}, lt::from_info_section);
+        if (ec) { set_err(s, "torrent parse: " + ec.message()); return LT_ERR_IO; }
+        lt::add_torrent_params p;
+        p.ti = std::move(ti);
+        p.save_path = s->save_path;
+        set_web_seeds(p, web_seeds);
+        return fill_ih(s, p, web_seeds, ih_out);
+    } catch (...) {
+        set_err(s, "torrent parse exception");
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_add_torrent_resume(lt_session* s, const uint8_t* resume_data, size_t len, const char** web_seeds, char* ih_out) {
+    if (!s || !resume_data || !len || !ih_out) return LT_ERR_ARG;
+    try {
+        lt::error_code ec;
+        lt::add_torrent_params p = lt::read_resume_data(
+            lt::span<const char>(reinterpret_cast<const char*>(resume_data), len), ec);
+        if (ec) { set_err(s, "resume parse: " + ec.message()); return LT_ERR_IO; }
+        p.save_path = s->save_path;
+        set_web_seeds(p, web_seeds);
+        return fill_ih(s, p, web_seeds, ih_out);
+    } catch (...) {
+        set_err(s, "resume parse exception");
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_resume(lt_session* s, const char* ih) {
+    if (!s || !ih) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        h.resume();
+        return LT_OK;
+    } catch (...) {
+        set_err(s, "engine error");
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_remove(lt_session* s, const char* ih, int delete_data) {
+    if (!s || !ih) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        s->ses.remove_torrent(h, delete_data ? lt::session_handle::delete_files
+                                             : lt::remove_flags_t{});
+        return LT_OK;
+    } catch (...) {
+        set_err(s, "engine error");
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_piece_count(lt_session* s, const char* ih, int* out) {
+    if (!s || !ih || !out) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        *out = h.status().num_pieces;
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_bitfield(lt_session* s, const char* ih, uint8_t* buf, size_t cap, size_t* out_len) {
+    if (!s || !ih || !out_len) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        const lt::torrent_status st = h.status();
+        const int np = st.num_pieces;
+        if (!st.has_metadata || np <= 0) { *out_len = 0; return LT_OK; }
+        const size_t needed = static_cast<size_t>((np + 7) / 8);
+        if (!buf || cap < needed) { *out_len = needed; return LT_ERR_BUFFER_TOO_SMALL; }
+        std::memset(buf, 0, needed);
+        for (int i = 0; i < np; ++i) {
+            if (st.pieces.get_bit(lt::piece_index_t{i})) {
+                buf[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+            }
+        }
+        *out_len = needed;
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_file_count(lt_session* s, const char* ih, int* out) {
+    if (!s || !ih || !out) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        const std::shared_ptr<const lt::torrent_info> tf = h.torrent_file();
+        if (!tf) { set_err(s, "metadata not available"); return LT_ERR_NOT_FOUND; }
+        *out = tf->num_files();
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_file_progress(lt_session* s, const char* ih, int64_t* done_arr, int64_t* size_arr, int n) {
+    if (!s || !ih || !done_arr || !size_arr || n <= 0) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        const std::shared_ptr<const lt::torrent_info> tf = h.torrent_file();
+        if (!tf) { set_err(s, "metadata not available"); return LT_ERR_NOT_FOUND; }
+        const int nf = tf->num_files();
+        if (n < nf) return LT_ERR_BUFFER_TOO_SMALL;
+        std::vector<int64_t> prog;
+        h.file_progress(prog);
+        for (int i = 0; i < nf; ++i) {
+            done_arr[i] = prog[i];
+            size_arr[i] = tf->files_impl().file_size(lt::file_index_t{i}); // ABI100：files() 仅 ABI<4
+        }
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+static void hex_encode_20(const char* data, char* out, size_t cap) {
+    static const char* hex = "0123456789abcdef";
+    for (int i = 0; i < 20 && static_cast<size_t>(i * 2 + 2) <= cap; ++i) {
+        const unsigned char b = static_cast<unsigned char>(data[i]);
+        out[i * 2] = hex[b >> 4];
+        out[i * 2 + 1] = hex[b & 0xF];
+    }
+}
+
+lt_err lt_peers(lt_session* s, const char* ih, lt_peer* buf, size_t cap, size_t* out_count) {
+    if (!s || !ih || !out_count) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        std::vector<lt::peer_info> v;
+        h.get_peer_info(v);
+        // D13 内存契约：cap 不足 → 报所需尺寸 + LT_ERR_BUFFER_TOO_SMALL（Rust 扩容重试）
+        // 空列表直接 OK（避免 cap=0 空转）
+        const size_t total = v.size();
+        if (total == 0) { *out_count = 0; return LT_OK; }
+        if (!buf || cap < total) { *out_count = total; return LT_ERR_BUFFER_TOO_SMALL; }
+        for (size_t i = 0; i < total; ++i) {
+            const lt::peer_info& pi = v[i];
+            lt_peer& o = buf[i];
+            std::memset(&o, 0, sizeof(o));
+            // ABI100：ip 字段由 remote_endpoint() 提供（ip 成员仅 ABI==1）
+            const lt::tcp::endpoint ep = pi.remote_endpoint();
+            const std::string ipstr = ep.address().to_string();
+            std::strncpy(o.ip, ipstr.c_str(), sizeof(o.ip) - 1);
+            o.port = ep.port();
+            const std::string pid = pi.pid.to_string();
+            hex_encode_20(pid.c_str(), o.peer_id, sizeof(o.peer_id));
+            std::strncpy(o.client, pi.client.c_str(), sizeof(o.client) - 1);
+            o.progress_ppm = pi.progress_ppm;
+            o.down_rate = pi.payload_down_speed;
+            o.up_rate = pi.payload_up_speed;
+            o.total_download = pi.total_download;
+            o.total_upload = pi.total_upload;
+            o.last_active_sec = std::chrono::duration_cast<std::chrono::seconds>(
+                                    pi.last_active).count();
+            const lt::peer_flags_t f = pi.flags; // ABI100：类型在命名空间级（peer_info 内 using 仅 ABI==1）
+            if (f & lt::peer_info::seed) o.flags |= LT_PEER_SEED;
+            if (f & lt::peer_info::upload_only) o.flags |= LT_PEER_UPLOADER;
+            if (f & lt::peer_info::interesting) o.flags |= LT_PEER_INTERESTED;
+            if (f & lt::peer_info::choked) o.flags |= LT_PEER_CHOKED;
+            if (f & lt::peer_info::remote_choked) o.flags |= LT_PEER_REMOTE_CHOKED;
+            if (f & lt::peer_info::snubbed) o.flags |= LT_PEER_SNUBBED;
+            if (f & lt::peer_info::connecting) o.flags |= LT_PEER_CONNECTING;
+            if (f & lt::peer_info::outgoing_connection) o.flags |= LT_PEER_LOCAL;
+            if (f & lt::peer_info::utp_socket) o.flags |= LT_PEER_UTP;
+        }
+        *out_count = total;
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_request_save_resume(lt_session* s, const char* ih) {
+    if (!s || !ih) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        h.save_resume_data(lt::torrent_handle::flush_disk_cache);
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_take_resume_data(lt_session* s, const char* ih, uint8_t* buf, size_t cap, size_t* out_len) {
+    if (!s || !ih || !out_len) return LT_ERR_ARG;
+    std::lock_guard<std::mutex> lk(s->mtx);
+    const auto it = s->resume_map.find(ih);
+    if (it == s->resume_map.end()) { set_err(s, "resume data not ready"); return LT_ERR_NOT_FOUND; }
+    const size_t sz = it->second.size();
+    if (!buf || cap < sz) { *out_len = sz; return LT_ERR_BUFFER_TOO_SMALL; }
+    std::memcpy(buf, it->second.data(), sz);
+    *out_len = sz;
+    return LT_OK;
+}
+
+lt_err lt_ban_peer(lt_session* s, const char* /*ih*/, const char* /*ip*/, uint16_t /*port*/) {
+    // v2：2.x 公开 API 无 per-endpoint ban（ban_ip 在 aux_ 内部）；v1 存根
+    if (!s) return LT_ERR_ARG;
+    set_err(s, "ban_peer: not implemented (2.x public API lacks endpoint ban)");
+    return LT_ERR_ENGINE;
+}
+
+lt_err lt_add_url_seed(lt_session* s, const char* ih, const char* url) {
+    if (!s || !ih || !url) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        h.add_url_seed(url);
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_add_tracker(lt_session* s, const char* ih, const char* url) {
+    if (!s || !ih || !url) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        h.add_tracker(lt::announce_entry(url));
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_set_sequential(lt_session* s, const char* ih, int on) {
+    if (!s || !ih) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        // 2.x：set_sequential_download 仅 ABI==1；全局开关由 range API 表达：
+        // on → 从第 0 片起顺序下载；off → 无全局解除 API，no-op（等待 range 自然耗尽/寻址策略接管）
+        if (on) {
+            h.set_sequential_range(lt::piece_index_t{0});
+        }
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_set_limits(lt_session* s, const char* ih, int64_t down_limit, int64_t up_limit) {
+    if (!s || !ih) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        const int64_t dl = down_limit > INT32_MAX ? INT32_MAX : down_limit;
+        const int64_t ul = up_limit > INT32_MAX ? INT32_MAX : up_limit;
+        h.set_download_limit(static_cast<int>(dl));
+        h.set_upload_limit(static_cast<int>(ul));
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
+lt_err lt_read_piece(lt_session* s, const char* ih, int idx, uint8_t* buf, size_t buflen, size_t* out_len) {
+    if (!s || !ih || !out_len) return LT_ERR_ARG;
+    try {
+        const lt::torrent_handle h = find_handle(s, ih);
+        if (!h.is_valid()) { set_err(s, "torrent not found"); return LT_ERR_NOT_FOUND; }
+        const std::string key = std::string(ih) + ":" + std::to_string(idx);
+        // 触发 async read_piece（数据在下次 drain 时落地 read_map；轮询语义：未就绪 → NOT_FOUND）
+        h.read_piece(lt::piece_index_t{idx});
+        {
+            std::lock_guard<std::mutex> lk(s->mtx);
+            const auto it = s->read_map.find(key);
+            if (it == s->read_map.end()) return LT_ERR_NOT_FOUND;
+            const size_t sz = it->second.size();
+            if (!buf || buflen < sz) { *out_len = sz; return LT_ERR_BUFFER_TOO_SMALL; }
+            std::memcpy(buf, it->second.data(), sz);
+            *out_len = sz;
+            s->read_map.erase(it); // 一次性消费
+        }
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
 }
 
 } // extern "C"

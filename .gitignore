@@ -1,6 +1,7 @@
 /target
 /.tools
 /ffi/build/
+/ffi/build-asan/
 /ffi/vcpkg_installed/
 /spike/target/
 /spike/cxx/target/
@@ -8,3 +9,5 @@
 /ffi/src/repro.exe
 /tools/xunlei-migrate/__pycache__/
 /tools/xunlei-migrate/e2e_out/
+*.profraw
+*.profdata

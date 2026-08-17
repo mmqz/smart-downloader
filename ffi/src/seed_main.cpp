@@ -96,12 +96,42 @@ int main(int argc, char** argv) {
         // 客户端 fan-out 到全部本地地址、同 peer-id 重复连接被踢（M0 调试实测）
         sp.set_bool(lt::settings_pack::enable_lsd, false);
         sp.set_bool(lt::settings_pack::enable_dht, false);
+        // 与客户端内核一致：纯 TCP（uTP 首连退避让 e2e 时序抖动，M1 peers 排查）
+        sp.set_bool(lt::settings_pack::enable_incoming_utp, false);
+        sp.set_bool(lt::settings_pack::enable_outgoing_utp, false);
+        // SEED 行 = 监听已就绪的同步点：等到 listen_succeeded_alert 才打印
+        //（客户端首连若被拒，libtorrent 重试间隔很长 → 测试假死；M1 peers 排查实测）
+        // 全量 mask：保持 SEED-ALERT 诊断可见
+        sp.set_int(lt::settings_pack::alert_mask,
+                   static_cast<int>(static_cast<std::uint32_t>(lt::alert_category::all)));
         lt::session ses(sp);
 
         lt::add_torrent_params p;
         p.ti = std::make_shared<lt::torrent_info>(ti);
         p.save_path = dir;
         ses.add_torrent(p); // file already complete -> seeds
+
+        bool listening = false;
+        for (int i = 0; i < 100 && !listening; ++i) {
+            std::vector<lt::alert*> als;
+            ses.pop_alerts(&als);
+            for (const lt::alert* a : als) {
+                if (a->type() == lt::listen_failed_alert::alert_type) {
+                    std::fprintf(stderr, "seed_main listen failed: %s\n", a->message().c_str());
+                    return 1;
+                }
+                if (a->type() == lt::listen_succeeded_alert::alert_type) {
+                    listening = true;
+                }
+            }
+            if (!listening) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }
+        if (!listening) {
+            std::fprintf(stderr, "seed_main: 5s 内未收到 listen_succeeded_alert\n");
+            return 1;
+        }
 
         char ih[41];
         hex_encode(v1, ih);

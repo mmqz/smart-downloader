@@ -30,7 +30,7 @@ fn main() {
     let lib_dir = env::var("LT_KERNEL_LIB_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            let mut cand = repo.join("ffi").join("build");
+            let cand = repo.join("ffi").join("build");
             for sub in ["Release", "Debug", ""] {
                 let p = cand.join(sub);
                 if p.join("lt_kernel.lib").exists() {
