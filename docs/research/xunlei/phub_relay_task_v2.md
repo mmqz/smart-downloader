@@ -85,3 +85,26 @@ equity_token=<REDACTED-25位数字>,token_mode=2,app_guid=<REDACTED>
 - 目标仍为 peer 加速器（几千行），非 134 消息全套
 - token/密钥属用户迅雷账号敏感材料：**任务包外不外传**，分析输出打码
 - 样本 bin 在 `scripts/research/captures/`（gitignore，不入库）
+
+## 9. 本地实测校准（2026-08-18 凌晨，用户侧验证）
+
+**9.1 priv/pub 配对验证：失败（不同模数）**
+- 提取的 RSA-2048 公钥（ReportSender2 代码区旁）与私钥**非同模**，不配对。
+- 判定：公钥属 **ReportSender2 上报组件**（crypt_aes_key/crypt_data_package 是
+  数据上报加密，**非 PHub 请求加密**）；私钥用途不明（非 PHub 服务端'），
+  **云端勿用此对解 ekey，会浪费轮次**。
+
+**9.2 368B 请求密文结构观察**
+- 头部存在小整数标记：offset8 `10 27 00 00`(=10000)、offset12 `80 00 00 00`(=128)、
+  offset0x8c `e0 00 00 00`(=224)；0x140 起 224B 高熵密文；整体 368=23×16。
+- 判定：**多段结构**（长度/计数头 + 分块密文），非单一 RSA 密文。
+  对照物：云端已有的 `SERIALIZE_FN`（0x1803192a0）反汇编。
+
+**9.3 36B 响应密钥流特征**
+- 同一密文在内存 3 处重复（不同时刻）→ **同一输入得同一输出 = ECB 或固定 IV**，
+  云端解密时**优先试 ECB**（无需 IV），其次 CBC + 猜测 IV 来源。
+
+**9.4 明文生命周期线索（供云端反汇编聚焦）**
+- PHub body 组装在 PhubHttpPkgRequester（`?AVPhubHttpPkgRequester@@` RTTI 实锤）；
+  序列化后端点在 WsHub/HTTP 缓冲（368B 密文旁有 POST 模板 + Host: sr-shub.sandai.net）。
+- 若云端需要代码段：用户侧可从 dump 提取模块代码交付（files 提取工具可加）。
