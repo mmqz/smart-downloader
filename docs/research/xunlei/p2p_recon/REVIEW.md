@@ -41,3 +41,21 @@
 
 - D-2026-08-17-02（DECISIONS.md）：接受 P3-C，P2P 侦察关闭
 - RESEARCH_STATE.md / NEXT_ACTION.md 同步
+
+## 6. 中间产物补齐归档（2026-08-17 晚）
+
+用户从云端分析环境下载了全部产出（`~/Downloads/p2p_research_complete*.md` 等），本次补齐入库：
+
+**新增（补 §3 缺失项）**：
+- `FINAL_REPORT.md` / `PROGRESS_REPORT_v2/v3.md` / `PUBLIC_INTEL_REPORT.md` / `RESEARCH_STATE.md`
+- `xbtpackage_vtables.json` / `phub_shub_cmd_analysis.json`（§3 审查时"搜不到"的符号表——现在物证在库，可复核）
+- `scripts/`（disasm_* / poc_phub_http_v2-v4 / test_captcha_sign*，capstone/ghidra 反汇编脚本）
+- `alist_src/*.go`（**alist AGPL-3.0 源码节选，仅作研究参考，不并入主程序**）
+- `p2p_research_complete.md`（最新完整版，含 P2 协议文档化 + P3 集成路径可行性评估 + "16 PoC 全部失败 → 下一步 Wireshark 抓 1 个真实 PHub POST" 结论）
+- `p2p_research_complete_v1.md`（前版，含独立 Http.dll 反汇编报告章节，v2 已重组整合）
+- `p2p_recon_complete.md`（10:36 早期合集：RESEARCH_STATE + PROGRESS v2/v3）
+- `xunlei_independence_analysis.md` / `xunlei_engine_research.md`（08-16 两篇决策依据，原在沙箱缺档）
+
+**证据分级（维持既定决策，不变）**：以上全部为逆向 AI 中间产物——**B-/C 级参考，禁止引用为 A 级**。§3 的三条"禁止引用"结论维持：message_id 重排表弃用、XPF_AES/RC4 未证实、PAM 论文 AES-ECB 印证弃用。新物证可复核 §3 存疑点，但**不得据此升级**；A 级需要真实抓包（Wireshark/pktmon 路径，用户侧可选）。
+
+**去重**：`xunlei_p2p_recon_report.md`（805KB）与 `xunlei_research_complete.md` 哈希一致，删除前者，统一指向后者。

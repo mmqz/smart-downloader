@@ -31,6 +31,18 @@ docs/research/xunlei/
 │   ├── RESEARCH_STATE.md
 │   ├── FINDINGS.md
 │   └── DECISIONS.md
+├── p2p_research_complete.md        ← P2P 接入逆向·最新完整版(11:32,P2 协议文档化 +
+│                                      P3 路径评估 + 16 PoC 失败→真实抓包建议)
+├── p2p_research_complete_v1.md     ← 前版(含独立 Http.dll 反汇编报告章节)
+├── p2p_recon_complete.md           ← 早期合集(RESEARCH_STATE + PROGRESS v2/v3)
+├── xunlei_independence_analysis.md ← 黑盒独立可行性分析(路径 A 采纳依据,08-16)
+├── xunlei_engine_research.md       ← 迅雷本地引擎逆向(被拒方案调研记录,08-16)
+├── p2p_recon/                      ← P2P 侦察中间产物补齐(08-17 晚,见 REVIEW §6)
+│   ├── REVIEW.md                   ← 审查记录(采纳 P3-C;证据分级;补齐归档说明)
+│   ├── FINAL_REPORT.md / PROGRESS_REPORT_v2/v3.md / PUBLIC_INTEL_REPORT.md
+│   ├── xbtpackage_vtables.json / phub_shub_cmd_analysis.json
+│   ├── alist_src/*.go              ← alist AGPL-3.0 节选,仅研究参考
+│   └── scripts/*.py                ← 反汇编/PoC 脚本(capstone/ghidra)
 ├── NEXT_ACTION.md                   ← 下一步(两个决策点 + 真实样本验证)
 └── sample_collection_guide.md       ← 用户采集真实样本的手册(5-10 分钟)
 

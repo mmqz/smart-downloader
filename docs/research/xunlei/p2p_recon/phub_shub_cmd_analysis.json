@@ -1,0 +1,235 @@
+{
+  "PHUB__PING__COMMID__PING_REQ": {
+    "found": true,
+    "str_va": "0x180398428",
+    "refs": []
+  },
+  "PHUB__PING__COMMID__PING_RESP": {
+    "found": true,
+    "str_va": "0x1803983f8",
+    "refs": []
+  },
+  "PHUB__PING__COMMID__LOGOUT": {
+    "found": true,
+    "str_va": "0x180398378",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__QUERY_RES_REQ": {
+    "found": true,
+    "str_va": "0x180398a60",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__QUERY_RES_RESP": {
+    "found": true,
+    "str_va": "0x180398b10",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__REPORT_RCS_REQ": {
+    "found": true,
+    "str_va": "0x180398b48",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__REPORT_RCS_RESP": {
+    "found": true,
+    "str_va": "0x180398c00",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__DELETE_RCS_REQ": {
+    "found": true,
+    "str_va": "0x180398bc8",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__DELETE_RCS_RESP": {
+    "found": true,
+    "str_va": "0x180398a98",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__INVALID_PEER_REQ": {
+    "found": true,
+    "str_va": "0x180398ad8",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__RES_NEED_REPORT_REQ": {
+    "found": true,
+    "str_va": "0x1803988d8",
+    "refs": []
+  },
+  "PHUB__GATEWAY__COMMID__RES_NEED_REPORT_RESP": {
+    "found": true,
+    "str_va": "0x180398b88",
+    "refs": []
+  },
+  "CmdPHubQueryRes": {
+    "found": true,
+    "str_va": "0x180397130",
+    "ref_va": "0x18015ecde",
+    "string_refs": [
+      {
+        "addr": "0x180397150",
+        "value": "D:\\jenkinsAgent\\workspace\\Downloadlib_33.2\\PC_SDK_Master_VS2019\\src\\P2P\\P2PCommand\\ServicePHubQueryRes.cpp",
+        "at": "0x18015ecd2"
+      },
+      {
+        "addr": "0x180397130",
+        "value": "CmdPHubQueryResResp::DoDecode",
+        "at": "0x18015ecde"
+      },
+      {
+        "addr": "0x1803971d8",
+        "value": "SkipLength: ",
+        "at": "0x18015ed1b"
+      }
+    ],
+    "immediates": [
+      {
+        "reg": "dword ptr [rsp + 0x28]",
+        "val": 164,
+        "val_hex": "0xa4",
+        "at": "0x18015ecca"
+      },
+      {
+        "reg": "edx",
+        "val": 25,
+        "val_hex": "0x19",
+        "at": "0x18015ece5"
+      },
+      {
+        "reg": "qword ptr [rsp + 0x3f0]",
+        "val": 128,
+        "val_hex": "0x80",
+        "at": "0x18015ed0f"
+      },
+      {
+        "reg": "dword ptr [rax]",
+        "val": 34,
+        "val_hex": "0x22",
+        "at": "0x18015ed9d"
+      }
+    ],
+    "calls": [
+      {
+        "target": "0x180006d20",
+        "at": "0x18015ecf2"
+      },
+      {
+        "target": "0x18001acc0",
+        "at": "0x18015ed31"
+      },
+      {
+        "target": "0x1803282fc",
+        "at": "0x18015ed62"
+      },
+      {
+        "target": "0x1800050a0",
+        "at": "0x18015ed83"
+      },
+      {
+        "target": "0x1803282fc",
+        "at": "0x18015ed98"
+      },
+      {
+        "target": "0x1803282fc",
+        "at": "0x18015eda2"
+      },
+      {
+        "target": "qword ptr [rip + 0x203104]",
+        "at": "0x18015edb6"
+      }
+    ]
+  },
+  "CmdPHubInsertRC": {
+    "found": true,
+    "str_va": "0x18044d0fd",
+    "refs": []
+  },
+  "CmdPHubDeleteRC": {
+    "found": true,
+    "str_va": "0x18044230c",
+    "refs": []
+  },
+  "CmdPHubInvalidPeer": {
+    "found": true,
+    "str_va": "0x1804425c6",
+    "refs": []
+  },
+  "CmdPHubIsRCOnline": {
+    "found": true,
+    "str_va": "0x1804428c9",
+    "refs": []
+  },
+  "CmdPHubNeedSyncCidStore": {
+    "found": true,
+    "str_va": "0x18044d406",
+    "refs": []
+  },
+  "CmdPHubGetCidStore": {
+    "found": true,
+    "str_va": "0x18044d3a3",
+    "refs": []
+  },
+  "CmdPHubReportCidStore": {
+    "found": true,
+    "str_va": "0x18044d4d3",
+    "refs": []
+  },
+  "CmdPHubReportRCList": {
+    "found": true,
+    "str_va": "0x180441fe3",
+    "refs": []
+  },
+  "CmdSHubQueryBTFileIndex": {
+    "found": true,
+    "str_va": "0x18044955d",
+    "refs": []
+  },
+  "CmdSHubQueryTorrentFile": {
+    "found": true,
+    "str_va": "0x180449866",
+    "refs": []
+  },
+  "CmdSHubInsertBCID": {
+    "found": true,
+    "str_va": "0x18043b203",
+    "refs": []
+  },
+  "CmdSHubInsertBTResource": {
+    "found": true,
+    "str_va": "0x18044a2b5",
+    "refs": []
+  },
+  "CmdSHubInsertServerRes": {
+    "found": true,
+    "str_va": "0x18043c3d6",
+    "refs": []
+  },
+  "CmdSHubQueryEmuleInfo": {
+    "found": true,
+    "str_va": "0x18044b166",
+    "refs": []
+  },
+  "CmdSHubQueryServerRes": {
+    "found": true,
+    "str_va": "0x18043c0d9",
+    "refs": []
+  },
+  "CmdSHubQueryUrlInfo": {
+    "found": true,
+    "str_va": "0x18043bacd",
+    "refs": []
+  },
+  "CmdSHubReportCorrection": {
+    "found": true,
+    "str_va": "0x18043ab3d",
+    "refs": []
+  },
+  "CmdSHubReportResQuality": {
+    "found": true,
+    "str_va": "0x18043bdc9",
+    "refs": []
+  },
+  "CmdSHubReportURLChange": {
+    "found": true,
+    "str_va": "0x18043b7c3",
+    "refs": []
+  }
+}
