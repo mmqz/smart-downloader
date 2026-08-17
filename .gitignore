@@ -11,3 +11,4 @@
 /tools/xunlei-migrate/e2e_out/
 *.profraw
 *.profdata
+download.bin.part
