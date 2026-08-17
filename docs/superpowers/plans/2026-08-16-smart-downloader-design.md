@@ -245,6 +245,22 @@ thunder:// 内容 = base64("AA" + 真实URL + "ZZ")
 
 **文件对齐（D24）**：BT 种子文件与云 resolve 文件按"相对路径末段 + 大小"对齐；无法对齐时云版本按自身 rel_path 落盘。
 
+### 7.2 迅雷链接家族归一化（daemon add 入口，M8 补充）
+
+`POST /tasks` / CLI `add` 接受的链接归一化（`core/src/source_parse/normalize.rs`）：
+
+```
+http(s)://          → Http（原样）
+thunder://          → 解码（7.1）→ 真实 URL 为 http(s) → Http；否则 Unsupported
+qqdl://             → base64(真实URL)（无 AA/ZZ 壳）→ http(s) → Http
+magnet:             → Magnet（v1 无 BT 引擎 → InvalidSource，清晰报错）
+ed2k://             → Ed2k（不支持 → InvalidSource）
+其它                → Unsupported（无法识别 → InvalidSource）
+```
+
+- 归一化在 `DaemonState::add_link_task` 消费：`Http(real)` 走既有 canonical 查重 + HttpEngine 流程（D34 剥 token 生效于解码后 URL）。
+- 测试：core normalize 单测 9 + daemon http_api 集成 3（thunder/qqdl 解码 201 + 快照 source 为真实 URL；magnet/ed2k/未知/坏 base64 → 400 明确报错）。
+
 ---
 
 ## 8. FFI 接口契约（v0.6：含 cxx spike 决策点 + alert 预算）

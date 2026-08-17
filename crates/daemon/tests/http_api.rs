@@ -4,6 +4,7 @@
 
 mod common;
 
+use base64::Engine;
 use common::{patterned, TestServer};
 use smart_dl_daemon::events::SchedulerEvent;
 use smart_dl_daemon::http;
@@ -222,4 +223,90 @@ async fn distinct_query_params_are_distinct_tasks() {
     assert_eq!(s1, reqwest::StatusCode::CREATED);
     let (s2, _) = add_task(&client, &base, &format!("{}?v=2", srv.url())).await;
     assert_eq!(s2, reqwest::StatusCode::CREATED, "v=1/v=2 是不同资源");
+}
+
+// ---- 迅雷链接家族归一化（thunder:// / qqdl://）----
+
+fn thunder_link(real: &str) -> String {
+    let inner = format!("AA{real}ZZ");
+    format!(
+        "thunder://{}",
+        base64::engine::general_purpose::STANDARD.encode(inner.as_bytes())
+    )
+}
+
+fn qqdl_link(real: &str) -> String {
+    format!(
+        "qqdl://{}",
+        base64::engine::general_purpose::STANDARD.encode(real.as_bytes())
+    )
+}
+
+#[tokio::test]
+async fn thunder_link_decoded_and_added() {
+    // thunder:// = base64("AA"+url+"ZZ") → 归一化后走 HTTP 引擎 → 201
+    let body = patterned(16 * 1024);
+    let srv = TestServer::start(body).await;
+    let (addr, state) = serve().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let resp = add_task(&client, &base, &thunder_link(&srv.url())).await;
+    assert_eq!(
+        resp.0,
+        reqwest::StatusCode::CREATED,
+        "thunder:// 应解码并 201"
+    );
+    let tid = resp.1["task_id"].as_str().unwrap().to_string();
+
+    // 快照 source 是解码后的真实 URL（非 thunder:// 壳）
+    let snap: serde_json::Value = client
+        .get(format!("{base}/tasks/{tid}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let src = snap["source"].as_str().unwrap();
+    assert!(!src.starts_with("thunder://"), "必须已解码: {src}");
+    assert!(src.contains(&srv.url()), "含真实 URL: {src}");
+}
+
+#[tokio::test]
+async fn qqdl_link_decoded_and_added() {
+    // qqdl:// = base64(url)（无 AA/ZZ 壳）→ 201
+    let body = patterned(16 * 1024);
+    let srv = TestServer::start(body).await;
+    let (addr, _state) = serve().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let resp = add_task(&client, &base, &qqdl_link(&srv.url())).await;
+    assert_eq!(resp.0, reqwest::StatusCode::CREATED, "qqdl:// 应解码并 201");
+}
+
+#[tokio::test]
+async fn magnet_ed2k_unknown_rejected_with_clear_error() {
+    // 归一化分类：magnet→BT(v1 无)；ed2k→不支持；未知→无法识别
+    let (addr, _state) = serve().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let (s, b) = add_task(&client, &base, "magnet:?xt=urn:btih:abc").await;
+    assert_eq!(s, reqwest::StatusCode::BAD_REQUEST);
+    assert!(b["error"].as_str().unwrap().contains("magnet"), "{b}");
+
+    let (s, b) = add_task(&client, &base, "ed2k://file|a|1|hash|").await;
+    assert_eq!(s, reqwest::StatusCode::BAD_REQUEST);
+    assert!(b["error"].as_str().unwrap().contains("ed2k"), "{b}");
+
+    let (s, b) = add_task(&client, &base, "sqla://whatever").await;
+    assert_eq!(s, reqwest::StatusCode::BAD_REQUEST);
+    assert!(b["error"].as_str().unwrap().contains("无法识别"), "{b}");
+
+    // 畸形 thunder://（坏 base64）同样 400
+    let (s, b) = add_task(&client, &base, "thunder://!!!not-base64!!!").await;
+    assert_eq!(s, reqwest::StatusCode::BAD_REQUEST);
+    assert!(b["error"].as_str().unwrap().contains("thunder"), "{b}");
 }

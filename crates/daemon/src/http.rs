@@ -103,7 +103,7 @@ async fn add_task(
     State(state): State<Arc<DaemonState>>,
     Json(req): Json<AddTaskReq>,
 ) -> impl IntoResponse {
-    match state.add_http_task(req.url, req.dest).await {
+    match state.add_link_task(req.url, req.dest).await {
         Ok(task_id) => (
             StatusCode::CREATED,
             Json(serde_json::json!({ "task_id": task_id })),

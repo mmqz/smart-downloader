@@ -2,6 +2,7 @@
 //! add/pause/resume/remove/snapshot/list/provider 快照；重复 canonical → 409 事件。
 
 use smart_dl_core::identity::{CanonicalId, CanonicalKind, ContentIdentity};
+use smart_dl_core::source_parse::normalize::{normalize_user_link, NormalizedSource};
 use smart_dl_core::state_machine::TaskState;
 use smart_dl_core::task::{DownloadTask, TaskId, TaskMetadata};
 use smart_dl_core::types::{
@@ -80,6 +81,27 @@ impl DaemonState {
 
     pub fn hub(&self) -> &WsHub {
         &self.hub
+    }
+
+    /// 添加任务入口：支持 http/https/thunder:///qqdl:// 链接（归一化后走 HTTP 引擎）；
+    /// magnet/ed2k/无法识别 → InvalidSource（v1 仅 HTTP 引擎）。
+    pub async fn add_link_task(
+        &self,
+        link: String,
+        dest_root: Option<String>,
+    ) -> Result<TaskId, DaemonError> {
+        match normalize_user_link(&link) {
+            NormalizedSource::Http(real) => self.add_http_task(real, dest_root).await,
+            NormalizedSource::Magnet(m) => Err(DaemonError::InvalidSource(format!(
+                "magnet 需 BT 引擎（v1 仅 HTTP）: {m}"
+            ))),
+            NormalizedSource::Ed2k(e) => {
+                Err(DaemonError::InvalidSource(format!("ed2k 不支持: {e}")))
+            }
+            NormalizedSource::Unsupported(orig) => Err(DaemonError::InvalidSource(format!(
+                "无法识别的链接: {orig}"
+            ))),
+        }
     }
 
     /// 添加 HTTP 任务：canonical 查重 → HttpEngine.add → TaskCreated 事件。
