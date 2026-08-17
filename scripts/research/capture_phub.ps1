@@ -20,8 +20,15 @@ $admin = (New-Object Security.Principal.WindowsPrincipal(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 )).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) {
-    Write-Host '[ERR] Admin required: right-click PowerShell -> Run as administrator'
-    exit 1
+    # self-elevate via UAC (user clicks Yes once)
+    $argList = '-ExecutionPolicy Bypass -NoExit -File "' + $MyInvocation.MyCommand.Path + '"'
+    try {
+        Start-Process powershell -Verb RunAs -ArgumentList $argList
+    } catch {
+        Write-Host '[ERR] UAC elevation cancelled or failed. Re-run in an admin terminal.'
+        exit 1
+    }
+    exit 0
 }
 
 pktmon filter remove *> $null
@@ -42,3 +49,4 @@ Write-Host ''
 Write-Host "[DONE] $pcap"
 Write-Host "       $txt"
 Write-Host 'Send the .pcapng (or .txt) path to the agent for body extraction.'
+$null = Read-Host 'Press Enter to close'
