@@ -59,3 +59,16 @@
 **证据分级（维持既定决策，不变）**：以上全部为逆向 AI 中间产物——**B-/C 级参考，禁止引用为 A 级**。§3 的三条"禁止引用"结论维持：message_id 重排表弃用、XPF_AES/RC4 未证实、PAM 论文 AES-ECB 印证弃用。新物证可复核 §3 存疑点，但**不得据此升级**；A 级需要真实抓包（Wireshark/pktmon 路径，用户侧可选）。
 
 **去重**：`xunlei_p2p_recon_report.md`（805KB）与 `xunlei_research_complete.md` 哈希一致，删除前者，统一指向后者。
+
+## 7. 真实抓包实测（2026-08-17 晚，闭环验证）
+
+研究建议"抓 1 个真实 PHub 请求破解 body 格式"。主项目侧用 **pktmon 全量抓包**（免安装，Windows 自带）实测：
+
+- 步骤：用户以管理员跑 `scripts/research/capture_phub.ps1`，打开迅雷下载 BT 任务，全量捕获 ~30s（62 万包，pktmon 丢 104 万事件——全量模式下性能不足，仅作参考）
+- **结果**：80 端口 **0 条流**；443 端口 39 条流，出站主目标 **104.17.186.65（Cloudflare）** + 180.163.54.163；另有 BT 协议流（180.114.103.36:20011 "BitTorrent protocol"、DHT/peer 6881、DNS DoH 223.5.5.5/1.12.12.12）
+- **判定**：新版迅雷 PHub 走 **443 TLS**（"POST / HTTP/1.1 明文"模板属旧版/其他路径）；body 在 TLS 密文内，应用层还有 ParamStream/AES（§3 未证实项，格式未破）。
+- **结论**：**建议的"抓 :80 POST body"路径实测不成立**。外部抓包拿不到明文 body（传输 TLS + 应用双层加密；中间人需绕过迅雷证书校验/SSL pinning，成本远超收益）。
+- **闭环**：P3-C（放弃接入）获实测反面支撑——16 PoC 失败（应用层格式）+ TLS 拦截（传输层）双路汇合，与归档结论一致。**本线到此为止，不再深入**。
+- 遗留可用物：BT 协议层流样本（180.114.103.36:20011）可作"迅雷 BT 层 100% 标准"的后续 A 级实证（不影响主项目，主项目已按 libtorrent 纯标准实现）。
+
+**实测工具**：`scripts/research/capture_phub.ps1`（pktmon 全量抓包，UAC 自提权）+ `extract_phub_body.py`（纯标准库 pcapng 解析/TCP 重组）。真实抓包输出目录 `scripts/research/captures/` 已 gitignore（含用户网络流量，严禁入库）。
