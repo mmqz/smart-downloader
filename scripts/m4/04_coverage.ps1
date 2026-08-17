@@ -13,7 +13,8 @@ try {
     $env:RUSTFLAGS = '-C instrument-coverage'
     $env:CARGO_INCREMENTAL = '0'
     $env:LLVM_PROFILE_FILE = "$wt\m4cov-%p-%m.profraw"
-    cargo +nightly test -p smart-dl-httpdl
+    # M4c: FTP 引擎 feature-gated → 覆盖率需带 --features ftp 才会插桩
+    cargo +nightly test -p smart-dl-httpdl --features ftp
     if ($LASTEXITCODE -ne 0) { throw "cargo test failed" }
 
     $rustup_home = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE '.rustup' }

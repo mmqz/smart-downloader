@@ -2,6 +2,9 @@
 //! 行为：支持/忽略 Range（206/200）、416、ETag、前 N 次 429、指定 Range 起点 404、
 //! 首次坏内容（verify 用）、确定性大文件内容（64MB SHA256 用例）；记录 Range 起点。
 
+// 按测试二进制编译，未使用的构造/helper 属正常
+#![allow(dead_code)]
+
 use axum::{
     extract::State,
     http::{header, HeaderMap, StatusCode},

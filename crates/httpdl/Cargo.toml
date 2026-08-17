@@ -3,6 +3,10 @@ name = "smart-dl-httpdl"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# FTP 引擎（D12：并入 httpdl，feature-gated）
+ftp = []
+
 [dependencies]
 tokio = { workspace = true }
 reqwest = { workspace = true }

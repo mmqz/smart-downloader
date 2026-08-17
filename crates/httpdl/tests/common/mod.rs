@@ -70,6 +70,41 @@ pub fn make_http_task_sha256(
     t
 }
 
+/// FTP 任务（feature=ftp 测试用）。
+#[cfg(feature = "ftp")]
+pub fn make_ftp_task(id: &str, url: &str, dest_root: PathBuf, name: &str) -> DownloadTask {
+    DownloadTask {
+        id: id.to_string(),
+        canonical_id: CanonicalId {
+            kind: CanonicalKind::Ftp,
+            identity: url.to_string(),
+            validator: None,
+            token_sensitive: false,
+        },
+        source: DownloadSource::Ftp {
+            url: url.to_string(),
+            user: "user".to_string(),
+            pass: "pass".to_string(),
+        },
+        identity: ContentIdentity::SingleFile {
+            size: 0,
+            etag: None,
+            sha256: None,
+        },
+        dest_root,
+        files: vec![],
+        acquisitions: vec![],
+        aggregate: ProgressAggregate::default(),
+        state: TaskState::Evaluating(EvalPhase::MetadataPending),
+        retry: RetryState::default(),
+        created_at: Instant::now(),
+        metadata: TaskMetadata {
+            name: Some(name.to_string()),
+            added_at_unix: 0,
+        },
+    }
+}
+
 /// 轮询 status 直到 Completed/Error（30s 超时）。
 pub async fn wait_terminal(
     engine: &impl smart_dl_core::types::DownloadEngine,
