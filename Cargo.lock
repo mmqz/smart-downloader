@@ -1281,8 +1281,12 @@ name = "smart-dl-provider"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "reqwest",
  "serde",
+ "smart-dl-core",
+ "smart-dl-httpdl",
+ "tempfile",
  "thiserror",
  "tokio",
 ]

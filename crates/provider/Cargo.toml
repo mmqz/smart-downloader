@@ -9,3 +9,9 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
+smart-dl-core = { path = "../core" }
+
+[dev-dependencies]
+axum = "0.7"
+tempfile = "3"
+smart-dl-httpdl = { path = "../httpdl" }
