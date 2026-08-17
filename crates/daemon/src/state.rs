@@ -93,7 +93,7 @@ impl DaemonState {
         }
         let canonical = CanonicalId {
             kind: CanonicalKind::Http,
-            identity: url.clone(), // v1：URL 字符串为 canonical（D34 token 剔除 v2）
+            identity: canonical_http_url(&url), // D34：剥 token 参数后的 canonical 身份
             validator: None,
             token_sensitive: false,
         };
@@ -259,5 +259,79 @@ impl DaemonState {
             .iter()
             .map(|p| (p.name().to_string(), p.runtime()))
             .collect()
+    }
+}
+
+/// D34：canonical URL —— 剥离签名/token 参数后作为去重身份，使同一资源的
+/// 带签名链接（token 过期/轮换）仍能识别为同一任务。
+/// 黑名单（设计文档 §7 D34）：`token|sig|signature|expires|auth|X-Amz-*|X-Goog-*|X-Tencent-*|X-QiNiu-*`
+pub fn canonical_http_url(raw: &str) -> String {
+    let Ok(mut u) = url::Url::parse(raw) else {
+        return raw.to_string();
+    };
+    let mut kept: Vec<(String, String)> = Vec::new();
+    for (k, v) in u.query_pairs() {
+        if !is_token_param(&k) {
+            kept.push((k.into_owned(), v.into_owned()));
+        }
+    }
+    if kept.is_empty() {
+        u.set_query(None);
+    } else {
+        let qs: Vec<String> = kept.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+        u.set_query(Some(&qs.join("&")));
+    }
+    u.to_string()
+}
+
+/// 参数名是否命中 D34 token 黑名单（大小写敏感匹配，前缀通配 X-* 云签名族）。
+fn is_token_param(name: &str) -> bool {
+    matches!(name, "token" | "sig" | "signature" | "expires" | "auth")
+        || name.starts_with("X-Amz-")
+        || name.starts_with("X-Goog-")
+        || name.starts_with("X-Tencent-")
+        || name.starts_with("X-QiNiu-")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_http_url;
+
+    #[test]
+    fn strips_token_param_keeps_others() {
+        let c = canonical_http_url("https://host/a?token=abc&x=1&y=2");
+        assert_eq!(c, "https://host/a?x=1&y=2");
+    }
+
+    #[test]
+    fn strips_cloud_signing_family() {
+        let c = canonical_http_url(
+            "https://host/a?X-Amz-Signature=deadbeef&X-Amz-Date=20260101&sig=zz&expires=999999",
+        );
+        assert_eq!(c, "https://host/a");
+    }
+
+    #[test]
+    fn no_token_url_unchanged() {
+        let raw = "https://host/a?x=1";
+        assert_eq!(canonical_http_url(raw), raw);
+    }
+
+    #[test]
+    fn only_token_difference_collides() {
+        let a = canonical_http_url("https://host/f?token=aaa&v=1");
+        let b = canonical_http_url("https://host/f?v=1&token=bbb");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn invalid_url_passthrough() {
+        assert_eq!(canonical_http_url("not a url"), "not a url");
+    }
+
+    #[test]
+    fn fragment_and_path_unaffected() {
+        let c = canonical_http_url("https://host/dir/file.bin?token=x&keep=1#frag");
+        assert_eq!(c, "https://host/dir/file.bin?keep=1#frag");
     }
 }

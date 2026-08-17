@@ -1,8 +1,12 @@
-//! HTTP API（axum，M6）：任务 CRUD + 快照 + Provider 运行态 + WS 升级骨架。
+//! HTTP API（axum，M6）：任务 CRUD + 快照 + Provider 运行态 + WS 升级端点（M7）。
 
 use crate::state::DaemonState;
+use crate::ws::Throttler;
 use axum::{
-    extract::{Path, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
+    },
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -10,6 +14,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 #[derive(Deserialize)]
 pub struct AddTaskReq {
@@ -26,7 +31,72 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/tasks/:id/pause", post(pause_task))
         .route("/tasks/:id/resume", post(resume_task))
         .route("/providers", get(providers))
+        .route("/ws", get(ws_handler))
         .with_state(state)
+}
+
+/// WS 升级端点（D36 socket 端点，M7）：连接即推全量（重连重同步），随后
+/// 轮询增量 + 1s 快照节流（Progress/Speed 合并）。单消费者语义（D22 本机单
+/// 用户）；多连接时后来的连接会 drain 走队列，属可接受偏差。
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<DaemonState>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| ws_session(socket, state))
+}
+
+async fn ws_session(mut socket: WebSocket, state: Arc<DaemonState>) {
+    let hub = state.hub();
+
+    // 1) 连接即推送全量（掉队客户端重连重同步入口）
+    let mut last_seq = 0u64;
+    for env in hub.drain() {
+        if send_text(&mut socket, &env).await.is_none() {
+            return;
+        }
+        last_seq = env.seq;
+    }
+
+    // 2) 增量轮询 + 1s 节流
+    let mut throttler = Throttler::new();
+    let mut last_flush = Instant::now();
+    let mut tick = tokio::time::interval(Duration::from_millis(200));
+    loop {
+        tokio::select! {
+            msg = socket.recv() => match msg {
+                Some(Ok(Message::Close(_))) | None => return,
+                Some(Ok(Message::Ping(p))) => {
+                    if socket.send(Message::Pong(p)).await.is_err() { return; }
+                }
+                Some(Ok(_)) => {} // 本端点以推送为主，忽略上行文本
+                Some(Err(_)) => return,
+            },
+            _ = tick.tick() => {
+                for env in hub.snapshot_upto(last_seq) {
+                    last_seq = env.seq;
+                    if Throttler::is_throttlable(&env.event) {
+                        throttler.upsert(env); // 合并，等 1s flush
+                    } else if send_text(&mut socket, &env).await.is_none() {
+                        return;
+                    }
+                }
+                if !throttler.is_empty() && last_flush.elapsed() >= Duration::from_secs(1) {
+                    for env in throttler.drain_pending() {
+                        if send_text(&mut socket, &env).await.is_none() {
+                            return;
+                        }
+                    }
+                    last_flush = Instant::now();
+                }
+            }
+        }
+    }
+}
+
+/// 序列化 Envelope 为 WS 文本帧；失败（连接断开）返回 None。
+async fn send_text(socket: &mut WebSocket, env: &crate::events::Envelope) -> Option<()> {
+    let text = serde_json::to_string(env).ok()?;
+    socket.send(Message::Text(text)).await.ok()
 }
 
 async fn add_task(

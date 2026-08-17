@@ -103,7 +103,11 @@ async fn duplicate_add_rejected_with_event() {
     assert_eq!(first.0, reqwest::StatusCode::CREATED);
 
     let second = add_task(&client, &base, &srv.url()).await;
-    assert_eq!(second.0, reqwest::StatusCode::CONFLICT, "重复 canonical 必须拒绝");
+    assert_eq!(
+        second.0,
+        reqwest::StatusCode::CONFLICT,
+        "重复 canonical 必须拒绝"
+    );
 
     // DuplicateRejected 事件已发布（seq 递增）
     let drained = state.hub().drain();
@@ -183,4 +187,39 @@ fn hub_wired_into_state() {
     let state = DaemonState::new(engine, vec![]);
     let hub: &WsHub = state.hub();
     assert_eq!(hub.last_seq(), 0);
+}
+
+#[tokio::test]
+async fn same_resource_different_tokens_deduped_d34() {
+    // D34：canonical 身份剥离 token 参数 → 同资源不同签名 token 判为同一任务（409）
+    let body = patterned(16 * 1024);
+    let srv = TestServer::start(body).await;
+    let (addr, _state) = serve().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let (s1, _) = add_task(&client, &base, &format!("{}?token=aaa", srv.url())).await;
+    assert_eq!(s1, reqwest::StatusCode::CREATED, "首次添加应 201");
+
+    let (s2, b2) = add_task(&client, &base, &format!("{}?token=bbb", srv.url())).await;
+    assert_eq!(s2, reqwest::StatusCode::CONFLICT, "token 不同仍应判重复");
+    assert!(
+        b2["error"].as_str().unwrap().contains("duplicate"),
+        "错误信息应含 duplicate: {b2}"
+    );
+}
+
+#[tokio::test]
+async fn distinct_query_params_are_distinct_tasks() {
+    // 非 token 参数差异 → 不同 canonical → 允许添加
+    let body = patterned(16 * 1024);
+    let srv = TestServer::start(body).await;
+    let (addr, _state) = serve().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let (s1, _) = add_task(&client, &base, &format!("{}?v=1", srv.url())).await;
+    assert_eq!(s1, reqwest::StatusCode::CREATED);
+    let (s2, _) = add_task(&client, &base, &format!("{}?v=2", srv.url())).await;
+    assert_eq!(s2, reqwest::StatusCode::CREATED, "v=1/v=2 是不同资源");
 }
