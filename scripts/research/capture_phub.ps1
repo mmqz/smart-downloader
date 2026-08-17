@@ -1,14 +1,12 @@
-# capture_phub.ps1 - capture real pr-phub.sandai.net:80 HTTP POSTs via pktmon
-# (no Wireshark / Npcap install needed; pktmon ships with Windows).
+# capture_phub.ps1 - capture ALL traffic while Xunlei does a BT download, then
+# the agent off-line extracts PHub HTTP POSTs from the pcapng.
+# (No Wireshark / Npcap install: pktmon ships with Windows. Run as admin or
+# accept the UAC prompt; the script self-elevates.)
 #
-# Usage: run AS ADMINISTRATOR. Then open Xunlei and start any BT/magnet download,
-# wait a few seconds, press Enter to stop. Outputs pcapng + text dump.
-#
-# Target facts (from docs/research/xunlei/p2p_research_complete.md):
-#   pr-phub.sandai.net -> 140.206.220.33 (Shanghai Telecom), TCP 80 plaintext HTTP,
-#   POST / returns "decrypt request failed" when body is wrong.
+# v2: no IP filter (pr-phub's IP rotates / version-specific), capture everything
+# for ~30s; agent filters afterwards. Also fixes -f log path (v1 wrote to the
+# default C:\WINDOWS\system32\PktMon.etl and the convert step failed).
 $ErrorActionPreference = 'Stop'
-$phubIp = '140.206.220.33'
 $outDir = Join-Path $PSScriptRoot 'captures'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -32,14 +30,13 @@ if (-not $admin) {
 }
 
 pktmon filter remove *> $null
-pktmon filter add phub -t TCP -i $phubIp -p 80
-if ($LASTEXITCODE -ne 0) { throw 'filter add failed' }
-pktmon start --capture --pkt-size 0
+pktmon start --capture --pkt-size 0 -f $pktlog
 if ($LASTEXITCODE -ne 0) { throw 'pktmon start failed' }
 
-Write-Host "[OK] capturing 140.206.220.33:80 (TCP) -> $pcap"
+Write-Host "[OK] capturing ALL traffic -> $pcap"
 Write-Host ''
-Write-Host 'Now: open Xunlei, start ONE BT/magnet download, wait 5-10s.'
+Write-Host 'Now: open Xunlei, start ONE BT/magnet download, wait 20-30s.'
+Write-Host '(If no BT task at hand: open a magnet/BT task in the download list.)'
 $null = Read-Host 'Press Enter when done'
 pktmon stop
 if ($LASTEXITCODE -ne 0) { throw 'pktmon stop failed' }
@@ -48,5 +45,5 @@ pktmon etl2txt $pktlog -o $txt
 Write-Host ''
 Write-Host "[DONE] $pcap"
 Write-Host "       $txt"
-Write-Host 'Send the .pcapng (or .txt) path to the agent for body extraction.'
+Write-Host 'Send the .pcapng path to the agent for extraction.'
 $null = Read-Host 'Press Enter to close'
