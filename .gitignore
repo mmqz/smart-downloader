@@ -13,3 +13,4 @@
 *.profdata
 download.bin.part
 crates/daemon/download.bin
+scripts/research/captures/
