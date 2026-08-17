@@ -22,7 +22,19 @@ try {
     & (Join-Path $llvm 'llvm-profdata.exe') merge -sparse (Get-ChildItem "$wt\m5cov-*.profraw").FullName -o "$wt\m5cov.profdata"
     if ($LASTEXITCODE -ne 0) { throw "llvm-profdata merge failed" }
 
-    $exes = @(Get-ChildItem "$wt\debug\deps\*.exe", "$wt\debug\build\smart-dl-provider\*\out\*.exe" -ErrorAction SilentlyContinue)
+    # NOTE: cargo 1.100 nightly puts integration test exes under
+    # build/<pkg>/<hash>/out/ (not deps/). deps/ accumulates all crates' exes;
+    # a full glob blows the cmd.exe 32767-char command line.
+    $pats = @('smart_dl_provider-*', 'mock_lifecycle-*', 'quota_backoff-*', 'link_expiry-*', 'fallback_integration-*')
+    $e1 = @(Get-ChildItem "$wt\debug\deps\*.exe" -ErrorAction SilentlyContinue | Where-Object {
+        $n = $_.Name
+        $pats | Where-Object { $n -like $_ }
+    })
+    $e2 = @(Get-ChildItem "$wt\debug\build\smart-dl-provider\*\out\*.exe" -ErrorAction SilentlyContinue | Where-Object {
+        $n = $_.Name
+        $pats | Where-Object { $n -like $_ }
+    })
+    $exes = @($e1 + $e2)
     # no quotes on objects: cmd /c needs balanced quotes; quoted objects break
     # when exe count parity changes ("The syntax of the command is incorrect.")
     $objs = @($exes | ForEach-Object { '--object=' + $_.FullName })
