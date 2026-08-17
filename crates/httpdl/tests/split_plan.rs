@@ -35,7 +35,14 @@ fn plan_small_file_floor_is_2() {
 #[test]
 fn segments_cover_file_exactly() {
     // 不相交 + 覆盖全文件 + 连续
-    for size in [1u64, 10 * MB, 100 * MB, 1024 * MB, 10 * 1024 * MB, 7 * 1024 * 1024 * MB] {
+    for size in [
+        1u64,
+        10 * MB,
+        100 * MB,
+        1024 * MB,
+        10 * 1024 * MB,
+        7 * 1024 * 1024 * MB,
+    ] {
         let segs = plan_segments(size);
         assert_eq!(segs.first().unwrap().start, 0);
         assert_eq!(segs.last().unwrap().end, size - 1);

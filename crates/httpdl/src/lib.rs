@@ -4,10 +4,12 @@
 // 测试以 `httpdl::` 引用（包名为 smart-dl-httpdl）。
 extern crate self as httpdl;
 
+pub mod download;
 pub mod engine;
 pub mod range;
 pub mod resume;
 pub mod retry;
 pub mod static_split;
+pub mod verify;
 
 pub use engine::HttpEngine;

@@ -21,7 +21,9 @@ async fn etag_match_continues_from_part_len() {
         },
     )
     .await;
-    let probe = probe_range(&client(), &srv.url("/file"), &[]).await.unwrap();
+    let probe = probe_range(&client(), &srv.url("/file"), &[])
+        .await
+        .unwrap();
     let d = decide_resume(100, Some("etag-1"), &probe);
     assert_eq!(d, ResumeDecision::ContinueFrom(100));
 }
@@ -38,7 +40,9 @@ async fn etag_mismatch_but_server_respects_range_continues() {
         },
     )
     .await;
-    let probe = probe_range(&client(), &srv.url("/file"), &[]).await.unwrap();
+    let probe = probe_range(&client(), &srv.url("/file"), &[])
+        .await
+        .unwrap();
     let d = decide_resume(100, Some("etag-1"), &probe);
     assert_eq!(d, ResumeDecision::ContinueFrom(100));
 }
@@ -53,7 +57,9 @@ async fn server_ignores_range_restarts() {
         },
     )
     .await;
-    let probe = probe_range(&client(), &srv.url("/file"), &[]).await.unwrap();
+    let probe = probe_range(&client(), &srv.url("/file"), &[])
+        .await
+        .unwrap();
     // ETag 不一致 + 服务器忽略 Range → 无法续传 → 重下
     let d = decide_resume(100, Some("old-etag"), &probe);
     assert_eq!(d, ResumeDecision::Restart, "忽略 Range → 无法续传 → 重下");
@@ -69,7 +75,9 @@ async fn server_416_restarts() {
         },
     )
     .await;
-    let probe = probe_range(&client(), &srv.url("/file"), &[]).await.unwrap();
+    let probe = probe_range(&client(), &srv.url("/file"), &[])
+        .await
+        .unwrap();
     // ETag 不一致 + 416 → 范围非法 → 重下
     let d = decide_resume(100, Some("old-etag"), &probe);
     assert_eq!(d, ResumeDecision::Restart, "416 → 范围非法 → 重下");
@@ -83,7 +91,11 @@ fn part_longer_than_file_restarts() {
         total: Some(100),
     };
     let d = decide_resume(150, Some("etag-1"), &probe);
-    assert_eq!(d, ResumeDecision::Restart, "part 比文件还长（Length 变化）→ 重下");
+    assert_eq!(
+        d,
+        ResumeDecision::Restart,
+        "part 比文件还长（Length 变化）→ 重下"
+    );
 }
 
 #[test]

@@ -1,5 +1,8 @@
 //! httpdl 测试共享：构造 Http 任务（最小 DownloadTask）。
 
+//! 测试 helper（按测试二进制编译，未使用的 helper 属正常）
+#![allow(dead_code)]
+
 use smart_dl_core::identity::{CanonicalId, CanonicalKind, ContentIdentity};
 use smart_dl_core::state_machine::{EvalPhase, TaskState};
 use smart_dl_core::task::{DownloadTask, ProgressAggregate, RetryState, TaskMetadata};
@@ -8,6 +11,16 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 pub fn make_http_task(id: &str, url: &str) -> DownloadTask {
+    make_http_task_to(id, url, PathBuf::from("."), None)
+}
+
+/// 完整参数版：dest_root + 输出文件名（M4b 下载落位用）。
+pub fn make_http_task_to(
+    id: &str,
+    url: &str,
+    dest_root: PathBuf,
+    name: Option<&str>,
+) -> DownloadTask {
     DownloadTask {
         id: id.to_string(),
         canonical_id: CanonicalId {
@@ -26,13 +39,54 @@ pub fn make_http_task(id: &str, url: &str) -> DownloadTask {
             etag: None,
             sha256: None,
         },
-        dest_root: PathBuf::from("."),
+        dest_root,
         files: vec![],
         acquisitions: vec![],
         aggregate: ProgressAggregate::default(),
         state: TaskState::Evaluating(EvalPhase::MetadataPending),
         retry: RetryState::default(),
         created_at: Instant::now(),
-        metadata: TaskMetadata::default(),
+        metadata: TaskMetadata {
+            name: name.map(str::to_string),
+            added_at_unix: 0,
+        },
+    }
+}
+
+/// 带 sha256 的任务（verify 用例）。
+pub fn make_http_task_sha256(
+    id: &str,
+    url: &str,
+    dest_root: PathBuf,
+    name: &str,
+    sha256: &str,
+) -> DownloadTask {
+    let mut t = make_http_task_to(id, url, dest_root, Some(name));
+    t.identity = ContentIdentity::SingleFile {
+        size: 0,
+        etag: None,
+        sha256: Some(sha256.to_string()),
+    };
+    t
+}
+
+/// 轮询 status 直到 Completed/Error（30s 超时）。
+pub async fn wait_terminal(
+    engine: &impl smart_dl_core::types::DownloadEngine,
+    tid: &str,
+) -> smart_dl_core::types::EngineStatus {
+    use smart_dl_core::types::EngineState;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let st = engine.status(&tid.to_string()).await.unwrap();
+        if matches!(st.state, EngineState::Completed | EngineState::Error) {
+            return st;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "下载 30s 未完成: {:?}",
+            st.state
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 }

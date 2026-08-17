@@ -9,8 +9,10 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
+sha2 = "0.10"
 smart-dl-core = { path = "../core" }
 
 [dev-dependencies]
 axum = "0.7"
+tempfile = "3"
 serde_json = { workspace = true }

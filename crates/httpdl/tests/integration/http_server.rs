@@ -1,5 +1,6 @@
 //! M4 测试基建：可配置 HTTP server（axum）。
-//! 行为：支持/忽略 Range（206/200）、416、ETag、前 N 次 429；记录每次 Range 请求起点。
+//! 行为：支持/忽略 Range（206/200）、416、ETag、前 N 次 429、指定 Range 起点 404、
+//! 首次坏内容（verify 用）、确定性大文件内容（64MB SHA256 用例）；记录 Range 起点。
 
 use axum::{
     extract::State,
@@ -8,11 +9,25 @@ use axum::{
     routing::get,
     Router,
 };
+use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
 };
+
+/// 确定性内容：i % 251（质数周期，避免 256 对齐巧合）。
+pub fn patterned(size: u64) -> Vec<u8> {
+    (0..size).map(|i| (i % 251) as u8).collect()
+}
+
+/// 按测试二进制编译，未使用的 helper 属正常。
+#[allow(dead_code)]
+pub fn sha256_of(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    format!("{:x}", h.finalize())
+}
 
 #[derive(Clone)]
 pub struct HttpServerConfig {
@@ -25,6 +40,14 @@ pub struct HttpServerConfig {
     pub etag: Option<&'static str>,
     /// 前 N 次请求回 429（按请求计数）。
     pub retry_429: u32,
+    /// 这些 Range 起点 → 404（模拟中途断流/mirror 失效）。
+    pub fail_ranges: Vec<u64>,
+    /// 前 N 次请求返回坏内容（verify "首次错后对" 用）；之后返回正常内容。
+    pub bad_first: u32,
+    /// 使用确定性模式内容（patterned），否则 0x5A 填充。
+    pub patterned_content: bool,
+    /// 自定义内容（覆盖 size/pattern；仅全文件语义，Range 仍按 size 切）。
+    pub content: Option<Vec<u8>>,
 }
 
 impl Default for HttpServerConfig {
@@ -35,16 +58,20 @@ impl Default for HttpServerConfig {
             always_416: false,
             etag: Some("etag-1"),
             retry_429: 0,
+            fail_ranges: vec![],
+            bad_first: 0,
+            patterned_content: false,
+            content: None,
         }
     }
 }
 
-/// 测试基建：可配置 HTTP server。range_starts/request_count 供 M4b 断言（当前骨架未用）。
-#[allow(dead_code)]
 pub struct HttpTestServer {
     pub addr: SocketAddr,
-    /// 每次带 Range 的请求的起点（验证续传位置）。
+    /// 每次带 Range 的请求的起点（验证续传位置/段覆盖）。
+    #[allow(dead_code)]
     pub range_starts: Arc<Mutex<Vec<u64>>>,
+    #[allow(dead_code)]
     pub request_count: Arc<AtomicUsize>,
 }
 
@@ -52,7 +79,11 @@ impl HttpTestServer {
     pub async fn start(cfg: HttpServerConfig) -> Self {
         let range_starts = Arc::new(Mutex::new(Vec::new()));
         let request_count = Arc::new(AtomicUsize::new(0));
-        let body = vec![0x5Au8; cfg.size as usize];
+        let body = match cfg.content.clone() {
+            Some(b) => b,
+            None if cfg.patterned_content => patterned(cfg.size),
+            None => vec![0x5Au8; cfg.size as usize],
+        };
 
         let app = Router::new()
             .route("/file", get(handler))
@@ -95,30 +126,53 @@ async fn handler(State(st): State<ServerState>, headers: HeaderMap) -> Response 
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     }
 
-    let mut builder = Response::builder().header(header::CONTENT_LENGTH, st.body.len().to_string());
+    let mut builder = Response::builder();
     if let Some(etag) = st.cfg.etag {
         builder = builder.header(header::ETAG, etag);
     }
 
-    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     match range {
         Some(r) if !st.cfg.always_416 => {
             let start = parse_range_start(&r);
             st.range_starts.lock().unwrap().push(start);
+            // 中途断流/mirror 失效：指定起点 → 404
+            if st.cfg.fail_ranges.contains(&start) {
+                return StatusCode::NOT_FOUND.into_response();
+            }
             if st.cfg.range {
                 let total = st.body.len() as u64;
-                let cr = format!("bytes {}-{}/{}", start, total - 1, total);
-                let body = st.body.get(start as usize..).unwrap_or(&[]).to_vec();
+                let end = parse_range_end(&r).unwrap_or(total - 1).min(total - 1);
+                // 坏内容：前 bad_first 次请求返回错字节（其余正常）
+                let payload: Vec<u8> = if (req_no as u32) < st.cfg.bad_first {
+                    st.body
+                        .get(start as usize..=end as usize)
+                        .unwrap_or(&[])
+                        .iter()
+                        .map(|b| b ^ 0xFF)
+                        .collect()
+                } else {
+                    st.body
+                        .get(start as usize..=end as usize)
+                        .unwrap_or(&[])
+                        .to_vec()
+                };
+                let cr = format!("bytes {}-{}/{}", start, end, total);
+                // 206：不设 Content-Length（hyper 按实际 body 长度填充）
                 builder
                     .status(StatusCode::PARTIAL_CONTENT)
                     .header(header::CONTENT_RANGE, cr)
-                    .body(axum::body::Body::from(body))
+                    .body(axum::body::Body::from(payload))
                     .unwrap()
                     .into_response()
             } else {
                 // 忽略 Range：200 全文件
                 builder
                     .status(StatusCode::OK)
+                    .header(header::CONTENT_LENGTH, st.body.len().to_string())
                     .body(axum::body::Body::from(st.body.clone()))
                     .unwrap()
                     .into_response()
@@ -135,6 +189,7 @@ async fn handler(State(st): State<ServerState>, headers: HeaderMap) -> Response 
         }
         None => builder
             .status(StatusCode::OK)
+            .header(header::CONTENT_LENGTH, st.body.len().to_string())
             .body(axum::body::Body::from(st.body.clone()))
             .unwrap()
             .into_response(),
@@ -148,4 +203,13 @@ fn parse_range_start(range: &str) -> u64 {
         .and_then(|r| r.split('-').next())
         .and_then(|s| s.parse().ok())
         .unwrap_or(0)
+}
+
+/// 解析 "bytes=START-END" 的终点（可选）。
+fn parse_range_end(range: &str) -> Option<u64> {
+    range
+        .strip_prefix("bytes=")
+        .and_then(|r| r.split('-').nth(1))
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse().ok())
 }

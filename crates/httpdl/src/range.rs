@@ -27,7 +27,10 @@ pub async fn probe_range(
     for (k, v) in headers {
         req = req.header(k, v);
     }
-    let resp = req.send().await.map_err(|e| EngineError::Other(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| EngineError::Other(e.to_string()))?;
     let status = resp.status();
     let etag = resp
         .headers()
@@ -37,8 +40,7 @@ pub async fn probe_range(
 
     match status {
         reqwest::StatusCode::PARTIAL_CONTENT => {
-            let total = content_range_total(resp.headers())
-                .or(resp.content_length());
+            let total = content_range_total(resp.headers()).or(resp.content_length());
             Ok(Probe {
                 range_supported: true,
                 etag,

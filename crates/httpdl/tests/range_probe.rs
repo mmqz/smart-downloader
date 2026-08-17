@@ -19,7 +19,9 @@ async fn server_206_reports_range_supported() {
         },
     )
     .await;
-    let p = probe_range(&client(), &srv.url("/file"), &[]).await.unwrap();
+    let p = probe_range(&client(), &srv.url("/file"), &[])
+        .await
+        .unwrap();
     assert!(p.range_supported, "206 应报告支持 Range");
     assert_eq!(p.etag.as_deref(), Some("etag-1"));
     assert_eq!(p.total, Some(2048));
@@ -35,7 +37,9 @@ async fn server_200_means_range_unsupported() {
         },
     )
     .await;
-    let p = probe_range(&client(), &srv.url("/file"), &[]).await.unwrap();
+    let p = probe_range(&client(), &srv.url("/file"), &[])
+        .await
+        .unwrap();
     assert!(!p.range_supported, "忽略 Range（200）应报告不支持");
     assert_eq!(p.total, Some(1024));
 }
@@ -50,7 +54,9 @@ async fn server_416_means_range_unsupported() {
         },
     )
     .await;
-    let p = probe_range(&client(), &srv.url("/file"), &[]).await.unwrap();
+    let p = probe_range(&client(), &srv.url("/file"), &[])
+        .await
+        .unwrap();
     assert!(!p.range_supported, "416 应报告不支持 Range");
 }
 

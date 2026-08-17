@@ -37,38 +37,62 @@ async fn add_returns_id_and_status_shows_metadata() {
 async fn pause_resume_updates_state() {
     let srv = integration::http_server::HttpTestServer::start(Default::default()).await;
     let engine = HttpEngine::new(client());
-    let tid = engine.add(&make_http_task("h2", &srv.url("/file"))).await.unwrap();
+    let tid = engine
+        .add(&make_http_task("h2", &srv.url("/file")))
+        .await
+        .unwrap();
 
     engine.pause(&tid).await.unwrap();
-    assert_eq!(engine.status(&tid).await.unwrap().state, EngineState::Paused);
+    assert_eq!(
+        engine.status(&tid).await.unwrap().state,
+        EngineState::Paused
+    );
 
     engine.resume(&tid).await.unwrap();
-    assert_eq!(engine.status(&tid).await.unwrap().state, EngineState::Downloading);
+    assert_eq!(
+        engine.status(&tid).await.unwrap().state,
+        EngineState::Downloading
+    );
 }
 
 #[tokio::test]
 async fn remove_then_status_not_found() {
     let srv = integration::http_server::HttpTestServer::start(Default::default()).await;
     let engine = HttpEngine::new(client());
-    let tid = engine.add(&make_http_task("h3", &srv.url("/file"))).await.unwrap();
+    let tid = engine
+        .add(&make_http_task("h3", &srv.url("/file")))
+        .await
+        .unwrap();
 
     engine.remove(&tid, false).await.unwrap();
-    assert!(matches!(engine.status(&tid).await, Err(EngineError::NotFound)));
+    assert!(matches!(
+        engine.status(&tid).await,
+        Err(EngineError::NotFound)
+    ));
 }
 
 #[tokio::test]
 async fn read_piece_is_unsupported() {
     let srv = integration::http_server::HttpTestServer::start(Default::default()).await;
     let engine = HttpEngine::new(client());
-    let tid = engine.add(&make_http_task("h4", &srv.url("/file"))).await.unwrap();
-    assert!(matches!(engine.read_piece(&tid, 0).await, Err(EngineError::Unsupported)));
+    let tid = engine
+        .add(&make_http_task("h4", &srv.url("/file")))
+        .await
+        .unwrap();
+    assert!(matches!(
+        engine.read_piece(&tid, 0).await,
+        Err(EngineError::Unsupported)
+    ));
 }
 
 #[tokio::test]
 async fn peers_are_empty_for_http() {
     let srv = integration::http_server::HttpTestServer::start(Default::default()).await;
     let engine = HttpEngine::new(client());
-    let tid = engine.add(&make_http_task("h5", &srv.url("/file"))).await.unwrap();
+    let tid = engine
+        .add(&make_http_task("h5", &srv.url("/file")))
+        .await
+        .unwrap();
     assert!(engine.peers(&tid).await.unwrap().is_empty());
 }
 

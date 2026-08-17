@@ -46,5 +46,9 @@ fn custom_backoff_respects_base_and_max() {
         max: Duration::from_secs(2),
     };
     assert_eq!(b.next_delay(1), Duration::from_millis(500));
-    assert_eq!(b.next_delay(3), Duration::from_secs(2), "2^2*0.5s=2s 达 max");
+    assert_eq!(
+        b.next_delay(3),
+        Duration::from_secs(2),
+        "2^2*0.5s=2s 达 max"
+    );
 }

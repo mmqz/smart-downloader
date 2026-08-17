@@ -1,9 +1,12 @@
-//! HttpEngine（§14，impl DownloadEngine）：M4a 骨架。
-//! add = 提取 URL → Range 探测 → 静态分块规划 → 登记任务；
-//! M4b 补充：多连接并行下载、镜像、update_sources 换源、校验、限速。
+//! HttpEngine（§14，impl DownloadEngine）：M4a 骨架 + M4b 多连接并行下载/镜像/换源/校验。
+//! add = 探测 → 规划 → 登记 → 后台下载循环；段失败 → 镜像轮换；校验失败 → 重下 1 次 → 降级接受。
 
+use crate::download::download_segments;
 use crate::range::probe_range;
 use crate::static_split::plan_segments;
+use crate::verify::verify_file;
+use smart_dl_core::identity::ContentIdentity;
+use smart_dl_core::session::output::OutputManager;
 use smart_dl_core::task::DownloadTask;
 use smart_dl_core::types::{
     Capability, DownloadEngine, DownloadSource, EngineError, EngineKind, EngineState, EngineStatus,
@@ -11,33 +14,229 @@ use smart_dl_core::types::{
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-/// 引擎内任务（M4a：探测 + 规划结果；M4b 挂下载状态）。
-/// url/headers 为 M4b 换源/重试预留（M4a 骨架不读）。
-#[allow(dead_code)]
+/// 换源竞态窗口：段失败后等待 update_sources 到达（mirrors 变化则重试）。
+const SOURCE_WINDOW: Duration = Duration::from_millis(500);
+
+/// 引擎内任务。
 struct HttpTask {
-    url: String,
     headers: Vec<(String, String)>,
+    /// 候选源列表（add 初始单 URL；update_sources 替换）。
+    mirrors: Vec<String>,
+    /// 当前源 ETag（换源对比）。
+    etag: Option<String>,
+    dest: PathBuf,
+    segments: Vec<crate::static_split::Segment>,
     state: EngineState,
-    metadata_received: bool,
-    total: u64,
     done: u64,
+    total: u64,
     error: Option<String>,
+    sha256: Option<String>,
+    verify_attempts: u32,
+    /// 换源代次：etag 变化 → gen+1 → 旧下载循环退出、新循环启动。
+    /// .part 路径随 gen 隔离（`dest.<gen>.part`），避免新旧循环并发写同一文件。
+    gen: u64,
+}
+
+struct EngineInner {
+    tasks: Mutex<HashMap<EngineTaskId, HttpTask>>,
 }
 
 /// HTTP 引擎：reqwest 传输 + 自研调度层（D29）。
+#[derive(Clone)]
 pub struct HttpEngine {
     client: reqwest::Client,
-    tasks: Mutex<HashMap<EngineTaskId, HttpTask>>,
+    inner: Arc<EngineInner>,
 }
 
 impl HttpEngine {
     pub fn new(client: reqwest::Client) -> Self {
         HttpEngine {
             client,
-            tasks: Mutex::new(HashMap::new()),
+            inner: Arc::new(EngineInner {
+                tasks: Mutex::new(HashMap::new()),
+            }),
         }
+    }
+
+    /// 启动下载循环（代次 gen）。
+    fn spawn_download(&self, tid: EngineTaskId, gen: u64) {
+        let client = self.client.clone();
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            download_loop(&client, inner, tid, gen).await;
+        });
+    }
+}
+
+async fn download_loop(
+    client: &reqwest::Client,
+    inner: Arc<EngineInner>,
+    tid: EngineTaskId,
+    gen: u64,
+) {
+    loop {
+        // 快照任务参数（不跨 await 持锁）
+        let (part, segments, mirrors, total, sha256) = {
+            let tasks = inner.tasks.lock().unwrap();
+            let t = match tasks.get(&tid) {
+                Some(t) if t.gen == gen => t,
+                _ => return, // 换源代次已推进 → 本循环作废
+            };
+            (
+                part_path_of(&t.dest, gen),
+                t.segments.clone(),
+                t.mirrors.clone(),
+                t.total,
+                t.sha256.clone(),
+            )
+        };
+
+        match download_segments(client, &part, &segments, &mirrors, total).await {
+            Ok(()) => {
+                // finalize 前检查代次：换源已发生 → 本循环结果作废（gen1 会重下）
+                let still_current = inner
+                    .tasks
+                    .lock()
+                    .unwrap()
+                    .get(&tid)
+                    .map(|t| t.gen == gen)
+                    .unwrap_or(false);
+                if !still_current {
+                    return;
+                }
+                // 段全部落位 → 校验（可选 sha256）
+                let dest = dest_of(&inner, &tid);
+                match &sha256 {
+                    Some(expected) => match verify_file(&part, expected) {
+                        Ok(true) => {
+                            // 校验通过 → 落位
+                            match finalize_part(&part, &dest, total) {
+                                Ok(()) => {
+                                    cleanup_old_parts(&dest, gen);
+                                    finish(&inner, &tid, EngineState::Completed, None);
+                                }
+                                Err(e) => finish(&inner, &tid, EngineState::Error, Some(e)),
+                            }
+                            return;
+                        }
+                        Ok(false) => {
+                            let attempts = {
+                                let mut tasks = inner.tasks.lock().unwrap();
+                                let t = tasks.get_mut(&tid).unwrap();
+                                t.verify_attempts += 1;
+                                t.verify_attempts
+                            };
+                            if attempts <= 1 {
+                                // 重下 1 次：作废 .part
+                                let _ = std::fs::remove_file(&part);
+                                continue;
+                            }
+                            // 降级接受 + 告警（Q-B5）
+                            match finalize_part(&part, &dest, total) {
+                                Ok(()) => {
+                                    cleanup_old_parts(&dest, gen);
+                                    finish(
+                                        &inner,
+                                        &tid,
+                                        EngineState::Completed,
+                                        Some("sha256 mismatch, accepted downgrade".to_string()),
+                                    );
+                                    return;
+                                }
+                                Err(e) => {
+                                    finish(&inner, &tid, EngineState::Error, Some(e));
+                                    return;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            finish(
+                                &inner,
+                                &tid,
+                                EngineState::Error,
+                                Some(format!("verify io: {e}")),
+                            );
+                            return;
+                        }
+                    },
+                    None => {
+                        match finalize_part(&part, &dest, total) {
+                            Ok(()) => {
+                                cleanup_old_parts(&dest, gen);
+                                finish(&inner, &tid, EngineState::Completed, None);
+                            }
+                            Err(e) => finish(&inner, &tid, EngineState::Error, Some(e)),
+                        }
+                        return;
+                    }
+                }
+            }
+            Err(e) => {
+                // 段全 mirror 失败：给 update_sources 一个竞态窗口
+                tokio::time::sleep(SOURCE_WINDOW).await;
+                let now_mirrors = {
+                    let tasks = inner.tasks.lock().unwrap();
+                    tasks.get(&tid).map(|t| t.mirrors.clone())
+                };
+                if now_mirrors.as_deref() != Some(mirrors.as_slice()) {
+                    continue; // 换源已生效 → 用新列表重试
+                }
+                finish(&inner, &tid, EngineState::Error, Some(e));
+                return;
+            }
+        }
+    }
+}
+
+fn dest_of(inner: &Arc<EngineInner>, tid: &str) -> PathBuf {
+    inner
+        .tasks
+        .lock()
+        .unwrap()
+        .get(tid)
+        .map(|t| t.dest.clone())
+        .unwrap_or_default()
+}
+
+fn finish(inner: &Arc<EngineInner>, tid: &str, state: EngineState, error: Option<String>) {
+    let mut tasks = inner.tasks.lock().unwrap();
+    if let Some(t) = tasks.get_mut(tid) {
+        t.state = state;
+        t.done = t.total;
+        t.error = error;
+    }
+}
+
+/// .part → 目标落位。换源/重下场景 dest 可能已有旧内容且大小相同
+/// （OutputManager::finalize_to 的幂等短路会直接 Ok 不覆盖）→ 先删 dest 强制落位。
+fn finalize_part(part: &Path, dest: &Path, total: u64) -> Result<(), String> {
+    let _ = std::fs::remove_file(dest);
+    let om = OutputManager::new(PathBuf::from("."));
+    om.finalize_to(part, dest, total).map_err(|e| e.to_string())
+}
+
+/// .part 路径：gen0 → `<dest>.part`（续传语义）；gen≥1 → `<dest>.<gen>.part`
+/// （换源重下与新循环隔离，避免并发写同一文件）。
+fn part_path_of(dest: &Path, gen: u64) -> PathBuf {
+    if gen == 0 {
+        let mut s = dest.as_os_str().to_os_string();
+        s.push(".part");
+        PathBuf::from(s)
+    } else {
+        let mut s = dest.as_os_str().to_os_string();
+        s.push(format!(".{gen}.part"));
+        PathBuf::from(s)
+    }
+}
+
+/// finalize 成功后清理旧代次的 .part（gen0 的 `<dest>.part` 或上一 gen）。
+fn cleanup_old_parts(dest: &Path, gen: u64) {
+    if gen > 0 {
+        let _ = std::fs::remove_file(part_path_of(dest, gen - 1));
     }
 }
 
@@ -64,54 +263,70 @@ impl DownloadEngine for HttpEngine {
     }
 
     async fn add(&self, task: &DownloadTask) -> Result<EngineTaskId, EngineError> {
-        let (url, headers, _auth) = match &task.source {
-            DownloadSource::Http { url, headers, auth: _ } => {
-                (url.clone(), headers.clone(), ())
-            }
+        let (url, headers) = match &task.source {
+            DownloadSource::Http { url, headers, .. } => (url.clone(), headers.clone()),
             _ => return Err(EngineError::Other("source is not http".to_string())),
         };
         let probe = probe_range(&self.client, &url, &headers).await?;
         let total = probe.total.unwrap_or(0);
-        // 规划（M4b 用段表驱动多连接；M4a 仅记录总长）
-        let _segments = plan_segments(total);
+        let segments = plan_segments(total);
+
+        let rel = task
+            .metadata
+            .name
+            .clone()
+            .unwrap_or_else(|| "download.bin".to_string());
+        let dest = task.dest_root.join(&rel);
+        let sha256 = match &task.identity {
+            ContentIdentity::SingleFile { sha256, .. } => sha256.clone(),
+            _ => None,
+        };
 
         let tid = task.id.clone();
-        let mut tasks = self.tasks.lock().unwrap();
-        tasks.insert(
-            tid.clone(),
-            HttpTask {
-                url,
-                headers,
-                state: EngineState::Downloading,
-                metadata_received: true,
-                total,
-                done: 0,
-                error: None,
-            },
-        );
+        {
+            let mut tasks = self.inner.tasks.lock().unwrap();
+            tasks.insert(
+                tid.clone(),
+                HttpTask {
+                    headers,
+                    mirrors: vec![url.clone()],
+                    etag: probe.etag.clone(),
+                    dest,
+                    segments,
+                    state: EngineState::Downloading,
+                    done: 0,
+                    total,
+                    error: None,
+                    sha256,
+                    verify_attempts: 0,
+                    gen: 0,
+                },
+            );
+        }
+        self.spawn_download(tid.clone(), 0);
         Ok(tid)
     }
 
     async fn pause(&self, id: &EngineTaskId) -> Result<(), EngineError> {
-        let mut tasks = self.tasks.lock().unwrap();
+        let mut tasks = self.inner.tasks.lock().unwrap();
         let t = tasks.get_mut(id).ok_or(EngineError::NotFound)?;
         t.state = EngineState::Paused;
         Ok(())
     }
 
     async fn resume(&self, id: &EngineTaskId) -> Result<(), EngineError> {
-        let mut tasks = self.tasks.lock().unwrap();
+        let mut tasks = self.inner.tasks.lock().unwrap();
         let t = tasks.get_mut(id).ok_or(EngineError::NotFound)?;
         t.state = EngineState::Downloading;
         Ok(())
     }
 
     async fn status(&self, id: &EngineTaskId) -> Result<EngineStatus, EngineError> {
-        let tasks = self.tasks.lock().unwrap();
+        let tasks = self.inner.tasks.lock().unwrap();
         let t = tasks.get(id).ok_or(EngineError::NotFound)?;
         Ok(EngineStatus {
             state: t.state,
-            metadata_received: t.metadata_received,
+            metadata_received: true,
             files: vec![],
             total_done: t.done,
             total: t.total,
@@ -124,18 +339,56 @@ impl DownloadEngine for HttpEngine {
     }
 
     async fn remove(&self, id: &EngineTaskId, _delete_data: bool) -> Result<(), EngineError> {
-        let mut tasks = self.tasks.lock().unwrap();
+        let mut tasks = self.inner.tasks.lock().unwrap();
         tasks.remove(id).ok_or(EngineError::NotFound)?;
         Ok(())
     }
 
     async fn peers(&self, _id: &EngineTaskId) -> Result<Vec<PeerInfo>, EngineError> {
-        // HTTP 无 peer 概念（D3 反吸血仅 BT）
         Ok(vec![])
     }
 
-    async fn update_sources(&self, _id: &EngineTaskId, _urls: Vec<String>) -> Result<(), EngineError> {
-        // M4b 实现（换源）；M4a 骨架先接受
+    async fn update_sources(
+        &self,
+        id: &EngineTaskId,
+        urls: Vec<String>,
+    ) -> Result<(), EngineError> {
+        if urls.is_empty() {
+            return Err(EngineError::Other("empty source list".to_string()));
+        }
+        // 锁外探测（std MutexGuard 不可跨 await）
+        let headers = {
+            let tasks = self.inner.tasks.lock().unwrap();
+            tasks.get(id).ok_or(EngineError::NotFound)?.headers.clone()
+        };
+        let probe = probe_range(&self.client, &urls[0], &headers).await?;
+
+        let mut tasks = self.inner.tasks.lock().unwrap();
+        let t = tasks.get_mut(id).ok_or(EngineError::NotFound)?;
+        let etag_changed = probe.etag.is_some() && t.etag.is_some() && probe.etag != t.etag;
+        if etag_changed {
+            // 新源内容变了 → 旧代次 .part 作废，重下（Q-B5：ETag 为准）。
+            // gen+1 → 新循环用 `<dest>.<gen>.part`，与旧循环写隔离。
+            let _ = std::fs::remove_file(part_path_of(&t.dest, t.gen));
+            t.done = 0;
+            t.verify_attempts = 0;
+            t.state = EngineState::Downloading;
+            t.error = None;
+            t.gen += 1; // 废弃旧下载循环
+        }
+        t.mirrors = urls.clone();
+        if let Some(e) = &probe.etag {
+            t.etag = Some(e.clone());
+        }
+        let (spawn, new_gen) = if etag_changed {
+            (true, t.gen)
+        } else {
+            (false, 0)
+        };
+        drop(tasks);
+        if spawn {
+            self.spawn_download(id.clone(), new_gen);
+        }
         Ok(())
     }
 
