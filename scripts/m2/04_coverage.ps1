@@ -7,6 +7,9 @@ $wt = Join-Path $root 'target'
 
 Push-Location (Join-Path $root 'crates\core')
 try {
+    # clean stale profraw: accumulation blows Windows cmdline length.
+    # NOTE: keep this file ASCII-only (PS 5.1 reads UTF-8-no-BOM as ANSI).
+    Remove-Item "$wt\m2cov-*.profraw" -ErrorAction SilentlyContinue
     cargo +nightly clean -p smart-dl-core
     $env:RUSTFLAGS = '-C instrument-coverage'
     $env:CARGO_INCREMENTAL = '0'
@@ -21,8 +24,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "llvm-profdata merge failed" }
 
     $exes = @(Get-ChildItem "$wt\debug\deps\*.exe", "$wt\debug\build\smart-dl-core\*\out\*.exe" -ErrorAction SilentlyContinue)
-    $objs = @($exes | ForEach-Object { '"--object=' + $_.FullName + '"' })
-    $cmdline = '"' + (Join-Path $llvm 'llvm-cov.exe') + '" report "-instr-profile=' + "$wt\m2cov.profdata" + '" ' + ($objs -join ' ') + ' --ignore-filename-regex=\.cargo --ignore-filename-regex=rustc'
+    # no quotes on objects: cmd /c needs balanced quotes; quoted objects break
+    # when exe count parity changes ("The syntax of the command is incorrect.")
+    $objs = @($exes | ForEach-Object { '--object=' + $_.FullName })
+    $cmdline = (Join-Path $llvm 'llvm-cov.exe') + ' report -instr-profile=' + "$wt\m2cov.profdata" + ' ' + ($objs -join ' ') + ' --ignore-filename-regex=\.cargo --ignore-filename-regex=rustc'
     cmd /c "$cmdline 2>&1" | Tee-Object -FilePath "$wt\m2cov-report.txt"
 
     $line = Select-String -Path "$wt\m2cov-report.txt" -Pattern 'TOTAL' | Select-Object -First 1
