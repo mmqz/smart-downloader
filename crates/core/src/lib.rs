@@ -7,6 +7,7 @@ pub mod identity;
 pub mod ownership;
 pub mod registry;
 pub mod router;
+pub mod session;
 pub mod source_parse;
 pub mod state_machine;
 pub mod task;

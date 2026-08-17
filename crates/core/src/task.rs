@@ -11,7 +11,8 @@ use std::path::PathBuf;
 pub type TaskId = String;
 
 /// 任务（§7）。数据所有权：Task 拥有 files[]；引擎只有传输权（§9）。
-#[derive(Clone, Debug)]
+/// M3: serde 化以支持 state.json 持久化；created_at 为单调时钟不可持久化 → skip。
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DownloadTask {
     pub id: TaskId,
     pub canonical_id: CanonicalId,
@@ -23,8 +24,14 @@ pub struct DownloadTask {
     pub aggregate: ProgressAggregate,
     pub state: TaskState,
     pub retry: RetryState,
+    /// 创建时刻（内存内单调时钟，不持久化；加载时取 now）。
+    #[serde(skip, default = "instant_now")]
     pub created_at: std::time::Instant,
     pub metadata: TaskMetadata,
+}
+
+fn instant_now() -> std::time::Instant {
+    std::time::Instant::now()
 }
 
 /// 单文件（§7）。

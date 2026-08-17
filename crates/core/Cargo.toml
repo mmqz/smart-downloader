@@ -11,3 +11,6 @@ async-trait = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"
