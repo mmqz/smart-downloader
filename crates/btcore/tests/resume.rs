@@ -77,6 +77,9 @@ fn take_before_request_is_not_found() {
 
     match c.take_resume_data(&ih) {
         Err(Error::NotFound(_)) => {}
-        other => panic!("未 request 时 take 应 NotFound，实际 {:?}", other.map(|d| d.len())),
+        other => panic!(
+            "未 request 时 take 应 NotFound，实际 {:?}",
+            other.map(|d| d.len())
+        ),
     }
 }

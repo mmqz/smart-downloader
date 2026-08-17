@@ -36,15 +36,26 @@ fn bt_51_percent_rejects_auto_fallback() {
 fn ratio_boundary_exactly_half_allows() {
     // <0.5 才自动兜底；恰好 0.5 不触发
     let policy = FallbackPolicy::default();
-    assert!(matches!(decide_auto_fallback(0.499, &policy), FallbackDecision::RequiresPauseFirst));
-    assert!(matches!(decide_auto_fallback(0.5, &policy), FallbackDecision::ManualOnly));
+    assert!(matches!(
+        decide_auto_fallback(0.499, &policy),
+        FallbackDecision::RequiresPauseFirst
+    ));
+    assert!(matches!(
+        decide_auto_fallback(0.5, &policy),
+        FallbackDecision::ManualOnly
+    ));
 }
 
 #[test]
 fn metadata_timeout_never_triggers_provider() {
     // Q-B9 写死：metadata 60s 超时 → 保持 BT + FallbackAvailable 标志（手动兜底）
     let action = on_metadata_timeout();
-    assert!(matches!(action, MetadataAction::KeepBt { fallback_available: true }));
+    assert!(matches!(
+        action,
+        MetadataAction::KeepBt {
+            fallback_available: true
+        }
+    ));
 }
 
 #[test]

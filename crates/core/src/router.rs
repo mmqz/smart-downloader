@@ -32,12 +32,7 @@ impl Router {
     ///   progress=0 < ratio 恒真 → 允许）；否则 → Engine(engine_id)
     /// - 非 BT 类 → Engine(engine_id)
     /// - ed2k/无引擎 → Failed
-    pub fn route(
-        &self,
-        source: &DownloadSource,
-        avg_peers: u32,
-        avg_seeds: u32,
-    ) -> RouteDecision {
+    pub fn route(&self, source: &DownloadSource, avg_peers: u32, avg_seeds: u32) -> RouteDecision {
         let engine_id = match self.registry.select(source) {
             Ok(id) => id,
             Err(e) => return RouteDecision::Failed(e),

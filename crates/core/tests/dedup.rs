@@ -25,8 +25,14 @@ fn duplicate_btih_rejected() {
 #[test]
 fn distinct_btih_accepted() {
     let mut idx = DedupIndex::new();
-    assert_eq!(idx.check(&btih_canonical("aaa"), "t1".into()), DedupOutcome::Accepted);
-    assert_eq!(idx.check(&btih_canonical("bbb"), "t2".into()), DedupOutcome::Accepted);
+    assert_eq!(
+        idx.check(&btih_canonical("aaa"), "t1".into()),
+        DedupOutcome::Accepted
+    );
+    assert_eq!(
+        idx.check(&btih_canonical("bbb"), "t2".into()),
+        DedupOutcome::Accepted
+    );
 }
 
 #[test]
@@ -49,7 +55,11 @@ fn token_url_without_validator_not_deduped() {
         token_sensitive: true,
     };
     assert_eq!(idx.check(&c, "t1".into()), DedupOutcome::Accepted);
-    assert_eq!(idx.check(&c, "t2".into()), DedupOutcome::Accepted, "无 validator 不认重");
+    assert_eq!(
+        idx.check(&c, "t2".into()),
+        DedupOutcome::Accepted,
+        "无 validator 不认重"
+    );
 }
 
 #[test]

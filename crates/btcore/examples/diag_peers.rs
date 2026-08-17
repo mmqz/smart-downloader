@@ -30,7 +30,11 @@ fn main() {
         let alerts = c.pop_alerts(32).expect("alerts");
         eprintln!(
             "state={} prog={:.2} peers_raw={} meta={} alerts={}",
-            st.state, st.progress, np.len(), st.metadata_received, alerts.len()
+            st.state,
+            st.progress,
+            np.len(),
+            st.metadata_received,
+            alerts.len()
         );
         for a in alerts.iter() {
             eprintln!("   alert {:?}: {}", a.kind, a.msg);

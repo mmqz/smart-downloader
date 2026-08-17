@@ -2,10 +2,11 @@
 
 use std::os::raw::c_char;
 
-use crate::ffi::{lt_alert, lt_alert_mask_LT_ALERT_ERROR, lt_alert_mask_LT_ALERT_METADATA,
-                 lt_alert_mask_LT_ALERT_PEER, lt_alert_mask_LT_ALERT_PIECE,
-                 lt_alert_mask_LT_ALERT_RESUME, lt_alert_mask_LT_ALERT_STATE,
-                 lt_alert_mask_LT_ALERT_TRACKER};
+use crate::ffi::{
+    lt_alert, lt_alert_mask_LT_ALERT_ERROR, lt_alert_mask_LT_ALERT_METADATA,
+    lt_alert_mask_LT_ALERT_PEER, lt_alert_mask_LT_ALERT_PIECE, lt_alert_mask_LT_ALERT_RESUME,
+    lt_alert_mask_LT_ALERT_STATE, lt_alert_mask_LT_ALERT_TRACKER,
+};
 
 /// 扁平化 kind（对应 lt_alert_mask 位）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

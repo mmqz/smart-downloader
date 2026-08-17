@@ -33,8 +33,10 @@ fn magnet_routes_to_bt() {
 fn torrent_file_routes_to_bt() {
     let reg = registry_with(MockEngine::bt(), MockEngine::http(), None);
     assert_eq!(
-        reg.select(&DownloadSource::TorrentFile(b"d4:infod4:name1:ad12:piece lengthi1e5:pieces1:ae".to_vec()))
-            .unwrap(),
+        reg.select(&DownloadSource::TorrentFile(
+            b"d4:infod4:name1:ad12:piece lengthi1e5:pieces1:ae".to_vec()
+        ))
+        .unwrap(),
         "bt"
     );
 }
@@ -58,13 +60,23 @@ fn thunder_routes_to_http_after_decode() {
     // thunder:// = base64("AA" + url + "ZZ")
     let reg = registry_with(MockEngine::bt(), MockEngine::http(), None);
     let inner = b"AAhttps://example.com/f.binZZ";
-    let thunder = format!("thunder://{}", base64::engine::general_purpose::STANDARD.encode(inner));
-    assert_eq!(reg.select(&DownloadSource::Thunder(thunder)).unwrap(), "http");
+    let thunder = format!(
+        "thunder://{}",
+        base64::engine::general_purpose::STANDARD.encode(inner)
+    );
+    assert_eq!(
+        reg.select(&DownloadSource::Thunder(thunder)).unwrap(),
+        "http"
+    );
 }
 
 #[test]
 fn ftp_routes_to_ftp_when_registered() {
-    let reg = registry_with(MockEngine::bt(), MockEngine::http(), Some(MockEngine::ftp()));
+    let reg = registry_with(
+        MockEngine::bt(),
+        MockEngine::http(),
+        Some(MockEngine::ftp()),
+    );
     assert_eq!(
         reg.select(&DownloadSource::Ftp {
             url: "ftp://example.com/f.bin".into(),

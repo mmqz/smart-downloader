@@ -81,7 +81,8 @@ impl Session {
     pub fn err_str(&self) -> Result<String> {
         let mut buf = vec![0u8; 1024];
         let mut n: usize = 0;
-        let code = unsafe { lt_err_str(self.raw, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut n) };
+        let code =
+            unsafe { lt_err_str(self.raw, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut n) };
         if code != lt_err_LT_OK && code != lt_err_LT_ERR_BUFFER_TOO_SMALL {
             return Err(Error::from(code));
         }
@@ -92,7 +93,10 @@ impl Session {
             if code2 != lt_err_LT_OK {
                 return Err(Error::from(code2));
             }
-            return Ok(CStr::from_bytes_with_nul(&big).unwrap_or_default().to_string_lossy().into_owned());
+            return Ok(CStr::from_bytes_with_nul(&big)
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned());
         }
         Ok(CStr::from_bytes_with_nul(&buf[..n + 1])
             .unwrap_or_default()
@@ -120,7 +124,13 @@ impl Session {
         let mut ih = self.out_ih();
         let (_own, ws) = cstr_array(web_seeds);
         let code = unsafe {
-            lt_add_torrent_file(self.raw, meta.as_ptr(), meta.len(), ws_mut(&ws), ih.as_mut_ptr())
+            lt_add_torrent_file(
+                self.raw,
+                meta.as_ptr(),
+                meta.len(),
+                ws_mut(&ws),
+                ih.as_mut_ptr(),
+            )
         };
         call(code, || Ok(ih_str(&ih)))
     }
@@ -129,7 +139,13 @@ impl Session {
         let mut ih = self.out_ih();
         let (_own, ws) = cstr_array(web_seeds);
         let code = unsafe {
-            lt_add_torrent_resume(self.raw, data.as_ptr(), data.len(), ws_mut(&ws), ih.as_mut_ptr())
+            lt_add_torrent_resume(
+                self.raw,
+                data.as_ptr(),
+                data.len(),
+                ws_mut(&ws),
+                ih.as_mut_ptr(),
+            )
         };
         call(code, || Ok(ih_str(&ih)))
     }
@@ -193,7 +209,8 @@ impl Session {
         loop {
             let mut buf = vec![0u8; cap];
             let mut n: usize = 0;
-            let code = unsafe { lt_bitfield(self.raw, i.as_ptr(), buf.as_mut_ptr(), buf.len(), &mut n) };
+            let code =
+                unsafe { lt_bitfield(self.raw, i.as_ptr(), buf.as_mut_ptr(), buf.len(), &mut n) };
             if code == lt_err_LT_OK {
                 buf.truncate(n);
                 return Ok(buf);
@@ -224,7 +241,13 @@ impl Session {
         let mut done = vec![0i64; nf];
         let mut size = vec![0i64; nf];
         let code = unsafe {
-            lt_file_progress(self.raw, i.as_ptr(), done.as_mut_ptr(), size.as_mut_ptr(), n)
+            lt_file_progress(
+                self.raw,
+                i.as_ptr(),
+                done.as_mut_ptr(),
+                size.as_mut_ptr(),
+                n,
+            )
         };
         call(code, || Ok(done.into_iter().zip(size).collect()))
     }
@@ -266,8 +289,7 @@ impl Session {
     pub fn pop_alerts(&self, cap: usize) -> Result<Vec<lt_alert>> {
         let mut buf = zeroed_alerts(cap.max(1));
         let mut n: usize = 0;
-        let code =
-            unsafe { lt_pop_alerts(self.raw, buf.as_mut_ptr(), buf.len(), &mut n) };
+        let code = unsafe { lt_pop_alerts(self.raw, buf.as_mut_ptr(), buf.len(), &mut n) };
         if code != lt_err_LT_OK {
             return Err(Error::from(code));
         }
@@ -321,7 +343,10 @@ impl Session {
     pub fn add_tracker(&self, ih: &str, url: &str) -> Result<()> {
         let i = self.ih(ih)?;
         let u = cstr(url)?;
-        call(unsafe { lt_add_tracker(self.raw, i.as_ptr(), u.as_ptr()) }, || Ok(()))
+        call(
+            unsafe { lt_add_tracker(self.raw, i.as_ptr(), u.as_ptr()) },
+            || Ok(()),
+        )
     }
 
     pub fn set_sequential(&self, ih: &str, on: bool) -> Result<()> {
@@ -347,8 +372,16 @@ impl Session {
         loop {
             let mut buf = vec![0u8; cap];
             let mut n: usize = 0;
-            let code =
-                unsafe { lt_read_piece(self.raw, i.as_ptr(), idx, buf.as_mut_ptr(), buf.len(), &mut n) };
+            let code = unsafe {
+                lt_read_piece(
+                    self.raw,
+                    i.as_ptr(),
+                    idx,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &mut n,
+                )
+            };
             match code {
                 lt_err_LT_OK => {
                     buf.truncate(n);

@@ -51,7 +51,17 @@ fn validator_serde_roundtrip() {
 
 #[test]
 fn canonical_id_distinguishes_kind_and_identity() {
-    let bt = CanonicalId { kind: CanonicalKind::Bt, identity: "abc".into(), validator: None, token_sensitive: false };
-    let tf = CanonicalId { kind: CanonicalKind::TorrentFile, identity: "abc".into(), validator: None, token_sensitive: false };
+    let bt = CanonicalId {
+        kind: CanonicalKind::Bt,
+        identity: "abc".into(),
+        validator: None,
+        token_sensitive: false,
+    };
+    let tf = CanonicalId {
+        kind: CanonicalKind::TorrentFile,
+        identity: "abc".into(),
+        validator: None,
+        token_sensitive: false,
+    };
     assert_ne!(bt, tf, "不同 kind 同 identity 不应相等");
 }

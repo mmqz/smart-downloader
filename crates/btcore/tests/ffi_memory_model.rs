@@ -77,7 +77,11 @@ fn grow_retry_on_take_resume_data() {
     }
     let data = data.expect("10s 内 resume 未就绪");
     assert!(!data.is_empty(), "resume bencode 非空");
-    assert!(data.len() > 64, "fastresume 应大于 64B，实际 {}", data.len());
+    assert!(
+        data.len() > 64,
+        "fastresume 应大于 64B，实际 {}",
+        data.len()
+    );
 }
 
 #[test]

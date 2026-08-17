@@ -15,5 +15,5 @@ pub mod resume;
 pub use alerts::{Alert, AlertKind, StateSubKind};
 pub use bare::Bare;
 pub use engine::{peer_flags, BtCore, PeerInfo, TorrentStatus};
-pub use resume::ResumeBytes;
 pub use ffi::{Error, Result};
+pub use resume::ResumeBytes;

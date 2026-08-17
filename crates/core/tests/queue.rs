@@ -23,19 +23,25 @@ fn bt_quota_three_fourth_queued() {
     for i in 0..4 {
         out.push(q.submit(format!("t{i}"), EngineKind::Bt));
     }
-    assert_eq!(out, vec![
-        QueueOutcome::Started,
-        QueueOutcome::Started,
-        QueueOutcome::Started,
-        QueueOutcome::Queued,
-    ]);
+    assert_eq!(
+        out,
+        vec![
+            QueueOutcome::Started,
+            QueueOutcome::Started,
+            QueueOutcome::Started,
+            QueueOutcome::Queued,
+        ]
+    );
     assert_eq!(q.active_count(EngineKind::Bt), 3);
 }
 
 #[test]
 fn http_quota_eight_ninth_queued() {
     let mut q = TaskQueue::default();
-    let ninth = (0..9).map(|i| q.submit(format!("h{i}"), EngineKind::Http)).last().unwrap();
+    let ninth = (0..9)
+        .map(|i| q.submit(format!("h{i}"), EngineKind::Http))
+        .last()
+        .unwrap();
     assert_eq!(ninth, QueueOutcome::Queued);
     assert_eq!(q.active_count(EngineKind::Http), 8);
 }
@@ -79,7 +85,10 @@ fn kinds_quota_independent() {
 #[test]
 fn registry_surface_quota_passthrough() {
     let reg = EngineRegistry::new();
-    assert_eq!(reg.quota(EngineKind::Bt), TaskQueue::default().quota(EngineKind::Bt));
+    assert_eq!(
+        reg.quota(EngineKind::Bt),
+        TaskQueue::default().quota(EngineKind::Bt)
+    );
 }
 
 #[test]
@@ -87,7 +96,10 @@ fn provider_quota_two() {
     let mut q = TaskQueue::default();
     q.submit("p1".into(), EngineKind::Provider);
     q.submit("p2".into(), EngineKind::Provider);
-    assert_eq!(q.submit("p3".into(), EngineKind::Provider), QueueOutcome::Queued);
+    assert_eq!(
+        q.submit("p3".into(), EngineKind::Provider),
+        QueueOutcome::Queued
+    );
 }
 
 #[test]

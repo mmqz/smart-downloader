@@ -42,7 +42,10 @@ fn status_metrics_and_geometry() {
     assert_eq!(st0.state, 4, "未连 peers 时应为 downloading_metadata(4)");
     assert!(!st0.metadata_received);
     assert_eq!(c.piece_count(&ih).expect("piece0"), 0);
-    assert!(c.bitfield(&ih).expect("bitfield0").is_empty(), "元数据前 bitfield 空");
+    assert!(
+        c.bitfield(&ih).expect("bitfield0").is_empty(),
+        "元数据前 bitfield 空"
+    );
 
     c.add_peer(&ih, &ip, port).expect("add_peer");
     // 下载中：metadata 已收，peers ≥1，progress 单调上升
@@ -50,8 +53,16 @@ fn status_metrics_and_geometry() {
     let mut last = 0.0f32;
     loop {
         let st = c.status(&ih).expect("status");
-        assert!(st.metadata_received || st.progress == 0.0, "metadata 后才能有进度");
-        assert!(st.progress >= last - 1e-6, "progress 应单调: {} -> {}", last, st.progress);
+        assert!(
+            st.metadata_received || st.progress == 0.0,
+            "metadata 后才能有进度"
+        );
+        assert!(
+            st.progress >= last - 1e-6,
+            "progress 应单调: {} -> {}",
+            last,
+            st.progress
+        );
         last = st.progress;
         assert!((0.0..=1.0).contains(&st.progress));
         assert!(st.downloaded <= st.total);
@@ -69,7 +80,11 @@ fn status_metrics_and_geometry() {
     assert_eq!(c.piece_count(&ih).expect("pieces"), PIECES as i32);
     let bf = c.bitfield(&ih).expect("bitfield");
     assert_eq!(bf.len(), (PIECES + 7) / 8, "bitfield 字节数");
-    assert!(bf.iter().all(|&b| b == 0xFF), "完成后 bitfield 全 1: {:?}", bf);
+    assert!(
+        bf.iter().all(|&b| b == 0xFF),
+        "完成后 bitfield 全 1: {:?}",
+        bf
+    );
 
     // 文件：单文件 2MB；进度=大小
     assert_eq!(c.file_count(&ih).expect("files"), 1);
@@ -95,8 +110,10 @@ fn control_ops_and_read_piece() {
     c.set_limits(&ih, 0, 0).expect("limits unrestricted");
     c.set_limits(&ih, 1 << 20, 1 << 20).expect("limits 1MB");
     c.set_sequential(&ih, true).expect("sequential on");
-    c.add_tracker(&ih, "http://127.0.0.1:9/announce").expect("add_tracker");
-    c.add_url_seed(&ih, "http://127.0.0.1:9/seed").expect("add_url_seed");
+    c.add_tracker(&ih, "http://127.0.0.1:9/announce")
+        .expect("add_tracker");
+    c.add_url_seed(&ih, "http://127.0.0.1:9/seed")
+        .expect("add_url_seed");
 
     // read_piece 轮询（v2）：完成后 piece 0 = 16384 B
     let dl = Instant::now() + Duration::from_secs(10);

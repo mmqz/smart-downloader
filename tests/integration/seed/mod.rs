@@ -26,7 +26,8 @@ impl TempDir {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.subsec_nanos())
             .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!("smart-dl-test-{}-{}", std::process::id(), nanos));
+        let path =
+            std::env::temp_dir().join(format!("smart-dl-test-{}-{}", std::process::id(), nanos));
         std::fs::create_dir_all(&path)?;
         Ok(Self { path })
     }
@@ -45,19 +46,26 @@ static SEED_MAIN: OnceLock<Option<PathBuf>> = OnceLock::new();
 fn seed_main_path() -> Option<PathBuf> {
     SEED_MAIN
         .get_or_init(|| {
-            std::env::var("SEED_MAIN").ok().map(PathBuf::from).or_else(|| {
-                let root = std::env::current_dir().ok()?;
-                let mut p = root;
-                loop {
-                    let cand = p.join("ffi").join("build").join("Release").join("seed_main.exe");
-                    if cand.exists() {
-                        return Some(cand);
+            std::env::var("SEED_MAIN")
+                .ok()
+                .map(PathBuf::from)
+                .or_else(|| {
+                    let root = std::env::current_dir().ok()?;
+                    let mut p = root;
+                    loop {
+                        let cand = p
+                            .join("ffi")
+                            .join("build")
+                            .join("Release")
+                            .join("seed_main.exe");
+                        if cand.exists() {
+                            return Some(cand);
+                        }
+                        if !p.pop() {
+                            return None;
+                        }
                     }
-                    if !p.pop() {
-                        return None;
-                    }
-                }
-            })
+                })
         })
         .clone()
 }
@@ -107,7 +115,12 @@ impl TestSeeder {
                             parts.next(); // PORT
                             let p: u16 = parts.next().expect("port").parse().expect("port num");
                             assert_eq!(p, port, "seed_main 报告的端口与请求不一致");
-                            return Self { child, magnet, port, dir };
+                            return Self {
+                                child,
+                                magnet,
+                                port,
+                                dir,
+                            };
                         }
                     }
                 }
@@ -132,7 +145,12 @@ impl TestSeeder {
     }
     /// (ip, port) 供 lt_add_peer 直连注入
     pub fn addr(&self) -> (String, u16) {
-        (SocketAddr::from((Ipv4Addr::LOCALHOST, self.port)).ip().to_string(), self.port)
+        (
+            SocketAddr::from((Ipv4Addr::LOCALHOST, self.port))
+                .ip()
+                .to_string(),
+            self.port,
+        )
     }
     /// seeder 诊断输出（seed_main 打印的 SEED-STATUS/SEED-ALERT 行）
     #[allow(dead_code)]

@@ -10,7 +10,9 @@ fn main() {
     let save = seed::TempDir::new().expect("tempdir");
     let session = smart_dl_btcore::Bare::new(save.path(), "diag").expect("session");
 
-    let ih = session.add_magnet(seeder.magnet(), &[]).expect("add_magnet");
+    let ih = session
+        .add_magnet(seeder.magnet(), &[])
+        .expect("add_magnet");
     println!("magnet: {}", seeder.magnet());
     println!("ih:     {}", ih);
     let (ip, port) = seeder.addr();
@@ -27,7 +29,13 @@ fn main() {
         let alerts = session.diag_pop_alerts().expect("pop");
         println!(
             "[{:2}s] progress={:.4} state={} meta={} peers={} seeds={} alerts={}",
-            i, p, state, if meta > 0 { "Y" } else { "n" }, peers, seeds, alerts.len()
+            i,
+            p,
+            state,
+            if meta > 0 { "Y" } else { "n" },
+            peers,
+            seeds,
+            alerts.len()
         );
         for a in alerts.iter().take(6) {
             println!("        {}", a);

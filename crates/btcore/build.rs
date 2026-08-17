@@ -45,13 +45,22 @@ fn main() {
     // vcpkg 动态库导入库：逐个链接（与 ffi cmake 的 LibtorrentRasterbar 传递依赖一致）
     let vcpkg_lib = env::var("LT_VCPKG_LIB_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| repo.join("ffi").join("vcpkg_installed").join("x64-windows").join("lib"));
+        .unwrap_or_else(|_| {
+            repo.join("ffi")
+                .join("vcpkg_installed")
+                .join("x64-windows")
+                .join("lib")
+        });
     println!("cargo:rustc-link-search=native={}", vcpkg_lib.display());
     if let Ok(entries) = std::fs::read_dir(&vcpkg_lib) {
         let mut names: Vec<String> = entries
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map(|x| x == "lib").unwrap_or(false))
-            .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .filter_map(|e| {
+                e.path()
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+            })
             .collect();
         names.sort();
         for stem in names {

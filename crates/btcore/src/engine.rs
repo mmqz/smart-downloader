@@ -176,7 +176,12 @@ impl BtCore {
     // —— 富 peer ——
 
     pub fn peers(&self, ih: &str) -> ffi::Result<Vec<PeerInfo>> {
-        Ok(self.sess.peers(ih)?.into_iter().map(PeerInfo::from).collect())
+        Ok(self
+            .sess
+            .peers(ih)?
+            .into_iter()
+            .map(PeerInfo::from)
+            .collect())
     }
 
     // —— alert ——

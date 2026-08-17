@@ -3,9 +3,7 @@
 
 mod common;
 
-use smart_dl_core::session::manager::{
-    should_save, ResumeOutcome, SaveReason, SessionManager,
-};
+use smart_dl_core::session::manager::{should_save, ResumeOutcome, SaveReason, SessionManager};
 use std::fs;
 use std::time::{Duration, Instant};
 
@@ -52,7 +50,11 @@ fn corrupted_resume_reports_error_but_task_survives() {
 #[test]
 fn pause_complete_shutdown_always_save() {
     let now = Instant::now();
-    for reason in [SaveReason::Pause, SaveReason::Complete, SaveReason::Shutdown] {
+    for reason in [
+        SaveReason::Pause,
+        SaveReason::Complete,
+        SaveReason::Shutdown,
+    ] {
         assert!(should_save(now, reason, INTERVAL), "{reason:?} 必须保存");
     }
 }

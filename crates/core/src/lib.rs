@@ -16,7 +16,7 @@ pub mod types;
 pub use dedup::{DedupIndex, DedupOutcome};
 pub use heat::{heat_level, heat_score, HeatEvaluator, HeatLevel};
 pub use identity::{CanonicalId, CanonicalKind, ContentIdentity, Validator};
-pub use ownership::{FallbackDecision, FallbackPolicy, MetadataAction, KeepLarger};
+pub use ownership::{FallbackDecision, FallbackPolicy, KeepLarger, MetadataAction};
 pub use registry::{EngineRegistry, QueueOutcome, RegistryError, RoutingError, TaskQueue};
 pub use router::{RouteDecision, Router};
 pub use state_machine::{EvalPhase, InvalidTransition, StateMachine, TaskState, TransitionCtx};

@@ -62,15 +62,15 @@ impl EngineRegistry {
     /// Ftp→ftp（未注册 → FeatureDisabled）；Ed2k→Unsupported。
     pub fn select(&self, source: &DownloadSource) -> Result<String, RoutingError> {
         match source {
-            DownloadSource::Magnet(_) => {
-                self.first_with(Capability::Magnet).ok_or(RoutingError::NoEngineForSource)
-            }
+            DownloadSource::Magnet(_) => self
+                .first_with(Capability::Magnet)
+                .ok_or(RoutingError::NoEngineForSource),
             DownloadSource::TorrentFile(_) => self
                 .first_with(Capability::TorrentFile)
                 .ok_or(RoutingError::NoEngineForSource),
-            DownloadSource::Http { .. } | DownloadSource::Thunder(_) => {
-                self.first_with(Capability::Http).ok_or(RoutingError::NoEngineForSource)
-            }
+            DownloadSource::Http { .. } | DownloadSource::Thunder(_) => self
+                .first_with(Capability::Http)
+                .ok_or(RoutingError::NoEngineForSource),
             DownloadSource::Ftp { .. } => self
                 .first_with(Capability::Ftp)
                 .ok_or_else(|| RoutingError::FeatureDisabled("ftp".into())),

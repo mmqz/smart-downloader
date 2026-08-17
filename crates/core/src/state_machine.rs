@@ -76,9 +76,10 @@ impl StateMachine {
                 TaskState::Evaluating(EvalPhase::PeerDiscovery),
                 TaskState::Evaluating(EvalPhase::HeatEvaluating),
             ) => true,
-            (TaskState::Evaluating(EvalPhase::HeatEvaluating), TaskState::Downloading(EngineKind::Bt)) => {
-                ctx.heat.is_some_and(|h| h >= 0.3)
-            }
+            (
+                TaskState::Evaluating(EvalPhase::HeatEvaluating),
+                TaskState::Downloading(EngineKind::Bt),
+            ) => ctx.heat.is_some_and(|h| h >= 0.3),
             (TaskState::Evaluating(EvalPhase::HeatEvaluating), TaskState::FallbackProvider) => {
                 ctx.heat.is_some_and(|h| h < 0.3)
             }

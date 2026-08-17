@@ -38,7 +38,10 @@ fn sufficient_space_is_ok() {
 #[test]
 fn insufficient_space_reports_required_and_available() {
     match evaluate_disk(19 * MB, 10 * MB) {
-        DiskCheck::Insufficient { required, available } => {
+        DiskCheck::Insufficient {
+            required,
+            available,
+        } => {
             assert_eq!(required, 20 * MB);
             assert_eq!(available, 19 * MB);
         }

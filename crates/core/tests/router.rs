@@ -69,7 +69,11 @@ fn http_routes_to_http_engine() {
 #[test]
 fn ed2k_routes_to_failed() {
     let r = router();
-    let d = r.route(&DownloadSource::Ed2k("ed2k://|file|x|1|h=abc|/".into()), 0, 0);
+    let d = r.route(
+        &DownloadSource::Ed2k("ed2k://|file|x|1|h=abc|/".into()),
+        0,
+        0,
+    );
     assert!(matches!(d, RouteDecision::Failed(RoutingError::Unsupported(ref s)) if s == "ed2k"));
 }
 

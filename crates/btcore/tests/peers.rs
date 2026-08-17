@@ -17,7 +17,11 @@ fn core() -> (BtCore, seed::TempDir) {
 fn peers_empty_without_connections() {
     // 未注入 peer / 未连 swarm → peers() 返回空列表 Ok（D13 空列表快路径）
     let (c, _save) = core();
-    let ih = c.add_magnet("magnet:?xt=urn:btih:a6453589c479ace6613048fb3c607a77495a3f7c", &[])
+    let ih = c
+        .add_magnet(
+            "magnet:?xt=urn:btih:a6453589c479ace6613048fb3c607a77495a3f7c",
+            &[],
+        )
         .expect("add_magnet");
     let p = c.peers(&ih).expect("peers");
     assert!(p.is_empty(), "无连接时应为空: {:?}", p);
@@ -49,11 +53,17 @@ fn rich_peer_fields_during_download() {
         std::thread::sleep(Duration::from_millis(200));
     }
     assert!(
-        peers.iter().any(|p| p.is_seed() && p.progress_ppm == 1_000_000),
+        peers
+            .iter()
+            .any(|p| p.is_seed() && p.progress_ppm == 1_000_000),
         "45s 内未看到 SEED 快照"
     );
     let p = peers.iter().find(|p| p.is_seed()).expect("seed peer");
-    assert!(p.ip.contains('.') || p.ip.contains(':'), "ip 非法: {}", p.ip);
+    assert!(
+        p.ip.contains('.') || p.ip.contains(':'),
+        "ip 非法: {}",
+        p.ip
+    );
     assert_eq!(p.port, port, "端口应等于 seeder 监听端口");
     assert_eq!(p.peer_id.len(), 40, "peer_id 应为 40 hex: {}", p.peer_id);
     // client 字符串：瞬时完成传输时快照可能尚未解析，允许为空（其余快照字段是硬契约）
@@ -63,7 +73,11 @@ fn rich_peer_fields_during_download() {
         p.progress_ppm
     );
     // seeder 已完成全部数据：seed 位 + progress_ppm == 1_000_000
-    assert!(p.flags & peer_flags::SEED != 0, "seeder 应标 SEED: flags={:#x}", p.flags);
+    assert!(
+        p.flags & peer_flags::SEED != 0,
+        "seeder 应标 SEED: flags={:#x}",
+        p.flags
+    );
     assert!(p.is_seed(), "is_seed() 与标志位一致");
     assert_eq!(p.progress_ppm, 1_000_000, "seeder progress_ppm 应为满");
     assert!(

@@ -1,8 +1,8 @@
 //! 共享 mock 引擎：实现 `DownloadEngine`，可注入 peers/seeds/progress/error。
 
 use async_trait::async_trait;
-use smart_dl_core::types::{Capability, DownloadEngine, EngineError, EngineKind, EngineStatus};
 use smart_dl_core::task::DownloadTask;
+use smart_dl_core::types::{Capability, DownloadEngine, EngineError, EngineKind, EngineStatus};
 use std::net::SocketAddr;
 use std::sync::Mutex;
 
@@ -106,7 +106,10 @@ impl DownloadEngine for MockEngine {
                 return Err(EngineError::Other("add".into()));
             }
         }
-        self.added.lock().unwrap().push(task.canonical_id.identity.clone());
+        self.added
+            .lock()
+            .unwrap()
+            .push(task.canonical_id.identity.clone());
         Ok(format!("{}-1", self.id))
     }
 
@@ -129,7 +132,10 @@ impl DownloadEngine for MockEngine {
         Ok(())
     }
 
-    async fn peers(&self, _id: &String) -> Result<Vec<smart_dl_core::types::PeerInfo>, EngineError> {
+    async fn peers(
+        &self,
+        _id: &String,
+    ) -> Result<Vec<smart_dl_core::types::PeerInfo>, EngineError> {
         Ok(Vec::new())
     }
 

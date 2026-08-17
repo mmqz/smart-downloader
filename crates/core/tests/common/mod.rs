@@ -3,7 +3,9 @@
 use smart_dl_core::identity::{CanonicalId, CanonicalKind, ContentIdentity};
 use smart_dl_core::ownership::{AcqKind, AcqState, Acquisition};
 use smart_dl_core::state_machine::{EvalPhase, TaskState};
-use smart_dl_core::task::{DownloadTask, FileState, ProgressAggregate, RetryState, TaskFile, TaskMetadata};
+use smart_dl_core::task::{
+    DownloadTask, FileState, ProgressAggregate, RetryState, TaskFile, TaskMetadata,
+};
 use smart_dl_core::types::{DownloadSource, EngineKind};
 use std::path::PathBuf;
 
@@ -50,10 +52,19 @@ pub fn make_task(id: &str, name: &str) -> DownloadTask {
             total: 1100,
             started_at_unix: Some(1),
         }],
-        aggregate: ProgressAggregate { done: 600, total: 1100 },
+        aggregate: ProgressAggregate {
+            done: 600,
+            total: 1100,
+        },
         state: TaskState::Evaluating(EvalPhase::MetadataPending),
-        retry: RetryState { retries: 0, max_retries: 3 },
+        retry: RetryState {
+            retries: 0,
+            max_retries: 3,
+        },
         created_at: std::time::Instant::now(),
-        metadata: TaskMetadata { name: Some(name.to_string()), added_at_unix: 1 },
+        metadata: TaskMetadata {
+            name: Some(name.to_string()),
+            added_at_unix: 1,
+        },
     }
 }

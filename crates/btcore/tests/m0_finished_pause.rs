@@ -19,7 +19,9 @@ fn torrent_finished_then_pause_ordering() {
     let session = Bare::new(save.path(), "m0-pause").expect("session");
     session.diag_set_mask(0xFFFF).expect("set_mask");
 
-    let ih = session.add_magnet(seeder.magnet(), &[]).expect("add_magnet");
+    let ih = session
+        .add_magnet(seeder.magnet(), &[])
+        .expect("add_magnet");
     let (ip, port) = seeder.addr();
     session.add_peer(&ih, &ip, port).expect("add_peer");
 
@@ -30,7 +32,12 @@ fn torrent_finished_then_pause_ordering() {
         if p >= 1.0 && state == 1 {
             break;
         }
-        assert!(Instant::now() < deadline, "did not finish in 60s (p={} state={})", p, state);
+        assert!(
+            Instant::now() < deadline,
+            "did not finish in 60s (p={} state={})",
+            p,
+            state
+        );
         std::thread::sleep(Duration::from_millis(200));
     }
 
@@ -59,11 +66,19 @@ fn torrent_finished_then_pause_ordering() {
     let fin = saw_finished_idx.expect("torrent_finished alert 未出现");
     let pau = saw_paused_idx.expect(&format!(
         "torrent_paused alert 未出现（10s 内）; 状态={:?}; 收集={:?}",
-        session.status(&ih).map(|(p, s)| (p, s)).unwrap_or((-1.0, -1)),
+        session
+            .status(&ih)
+            .map(|(p, s)| (p, s))
+            .unwrap_or((-1.0, -1)),
         collected
     ));
-    assert!(fin < pau, "torrent_finished(idx={}) 必须先于 torrent_paused(idx={})  全部: {:?}",
-            fin, pau, collected);
+    assert!(
+        fin < pau,
+        "torrent_finished(idx={}) 必须先于 torrent_paused(idx={})  全部: {:?}",
+        fin,
+        pau,
+        collected
+    );
 
     // 暂停后不再有数据传输（同步点 = torrent_paused alert，D19/D32）。
     // 注意：ABI100 无 flags_t，torrent_status::state 不反映暂停（状态停在完成），
@@ -71,5 +86,10 @@ fn torrent_finished_then_pause_ordering() {
     let (p, _state) = session.status(&ih).expect("status");
     assert_eq!(p, 1.0, "pause 后 progress 保持 1.0");
 
-    println!("OK: finished@{} < paused@{}（{} 条 alert）", fin, pau, collected.len());
+    println!(
+        "OK: finished@{} < paused@{}（{} 条 alert）",
+        fin,
+        pau,
+        collected.len()
+    );
 }

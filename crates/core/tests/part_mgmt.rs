@@ -92,6 +92,9 @@ fn finalize_to_unwritable_dest_reports_io() {
     // dest 指向不存在的父目录 → rename 与 copy 都失败
     let dest = dir.path().join("no/such/dir/x.bin");
 
-    assert!(matches!(om.finalize_to(&part, &dest, 4), Err(OutputError::Io(_))));
+    assert!(matches!(
+        om.finalize_to(&part, &dest, 4),
+        Err(OutputError::Io(_))
+    ));
     assert!(part.exists(), "失败时不得删除源 .part");
 }

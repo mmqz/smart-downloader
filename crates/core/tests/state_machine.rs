@@ -147,11 +147,7 @@ fn fallback_to_transferring_to_completed() {
         &TaskState::Transferring,
         &ctx()
     ));
-    assert!(sm.can_transition(
-        &TaskState::Transferring,
-        &TaskState::Completed,
-        &ctx()
-    ));
+    assert!(sm.can_transition(&TaskState::Transferring, &TaskState::Completed, &ctx()));
     assert!(sm.can_transition(
         &TaskState::Downloading(EngineKind::Http),
         &TaskState::Completed,
@@ -180,7 +176,10 @@ fn any_to_failed_allowed() {
         TaskState::Transferring,
         TaskState::FallbackProvider,
     ] {
-        assert!(sm.can_transition(&from, &TaskState::Failed, &ctx()), "{from:?}");
+        assert!(
+            sm.can_transition(&from, &TaskState::Failed, &ctx()),
+            "{from:?}"
+        );
     }
 }
 
@@ -188,20 +187,28 @@ fn any_to_failed_allowed() {
 fn illegal_transitions_rejected() {
     let sm = StateMachine;
     assert!(!sm.can_transition(&TaskState::Queued, &TaskState::Completed, &ctx()));
-    assert!(!sm.can_transition(&TaskState::Queued, &TaskState::Downloading(EngineKind::Bt), &ctx()));
-    assert!(!sm.can_transition(&TaskState::Completed, &TaskState::Downloading(EngineKind::Bt), &ctx()));
     assert!(!sm.can_transition(
-        &TaskState::Paused,
-        &TaskState::FallbackProvider,
+        &TaskState::Queued,
+        &TaskState::Downloading(EngineKind::Bt),
         &ctx()
     ));
+    assert!(!sm.can_transition(
+        &TaskState::Completed,
+        &TaskState::Downloading(EngineKind::Bt),
+        &ctx()
+    ));
+    assert!(!sm.can_transition(&TaskState::Paused, &TaskState::FallbackProvider, &ctx()));
 }
 
 #[test]
 fn transition_returns_new_state_or_forbidden() {
     let sm = StateMachine;
     assert!(sm
-        .transition(&TaskState::Queued, &TaskState::Evaluating(EvalPhase::MetadataPending), &ctx())
+        .transition(
+            &TaskState::Queued,
+            &TaskState::Evaluating(EvalPhase::MetadataPending),
+            &ctx()
+        )
         .is_ok());
     assert!(sm
         .transition(&TaskState::Queued, &TaskState::Completed, &ctx())

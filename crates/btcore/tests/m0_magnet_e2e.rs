@@ -16,11 +16,11 @@ fn real_magnet_makes_progress_within_60s() {
     let save = seed::TempDir::new().expect("tempdir");
     let session = Bare::new(save.path(), "m0").expect("session");
 
-    let ih = session.add_magnet(seeder.magnet(), &[]).expect("add_magnet");
+    let ih = session
+        .add_magnet(seeder.magnet(), &[])
+        .expect("add_magnet");
     let (ip, port) = seeder.addr();
-    session
-        .add_peer(&ih, &ip, port)
-        .expect("add_peer(seeder)");
+    session.add_peer(&ih, &ip, port).expect("add_peer(seeder)");
 
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {

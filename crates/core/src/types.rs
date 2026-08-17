@@ -20,7 +20,7 @@ pub enum DownloadSource {
         pass: String,
     },
     Thunder(String), // 解码为 Http（§7.1）
-    Ed2k(String),     // v1 不支持 → Failed
+    Ed2k(String),    // v1 不支持 → Failed
 }
 
 /// HTTP(S) 认证（Digest 属 v2）。
@@ -141,7 +141,8 @@ pub trait DownloadEngine: Send + Sync {
     async fn status(&self, id: &EngineTaskId) -> Result<EngineStatus, EngineError>;
     async fn remove(&self, id: &EngineTaskId, delete_data: bool) -> Result<(), EngineError>;
     async fn peers(&self, id: &EngineTaskId) -> Result<Vec<PeerInfo>, EngineError>;
-    async fn update_sources(&self, id: &EngineTaskId, urls: Vec<String>) -> Result<(), EngineError>;
+    async fn update_sources(&self, id: &EngineTaskId, urls: Vec<String>)
+        -> Result<(), EngineError>;
     async fn add_url_seed(&self, id: &EngineTaskId, url: &str) -> Result<(), EngineError>;
     async fn ban_peer(&self, id: &EngineTaskId, peer: SocketAddr) -> Result<(), EngineError>;
     async fn read_piece(&self, id: &EngineTaskId, idx: u32) -> Result<Vec<u8>, EngineError>;

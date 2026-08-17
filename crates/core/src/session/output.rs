@@ -119,6 +119,9 @@ pub fn evaluate_disk(available: u64, total: u64) -> DiskCheck {
     if available >= required {
         DiskCheck::Ok
     } else {
-        DiskCheck::Insufficient { required, available }
+        DiskCheck::Insufficient {
+            required,
+            available,
+        }
     }
 }
