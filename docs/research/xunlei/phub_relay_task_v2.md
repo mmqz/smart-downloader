@@ -108,3 +108,29 @@ equity_token=<REDACTED-25位数字>,token_mode=2,app_guid=<REDACTED>
 - PHub body 组装在 PhubHttpPkgRequester（`?AVPhubHttpPkgRequester@@` RTTI 实锤）；
   序列化后端点在 WsHub/HTTP 缓冲（368B 密文旁有 POST 模板 + Host: sr-shub.sandai.net）。
 - 若云端需要代码段：用户侧可从 dump 提取模块代码交付（files 提取工具可加）。
+
+## 10. 重放实验（2026-08-18 凌晨，决定性）——固定 key 实锤
+
+**实验**：把 Clash-on dump 捕获的 368B 请求密文原样 POST 到 `sr-shub.sandai.net:80`：
+- **4 次重放全部 200 OK**（`Server: elb`，实时 Date 头）
+- **4 次响应完全相同**（2692B，md5 一致，`80 0a 00 00` = 4B LE 长度 2688 + 密文）
+- 响应样本：`scripts/research/captures/replays/resp_0..3.bin`
+
+**结论（A 级）**：
+1. **协议无强防重放**——捕获的有效请求密文可直接复用（peer 加速器可原样重放）
+2. **响应用固定 key 加密**（相同请求 → 相同密文；无随机 IV/时间戳盐）——**ECB 或固定 IV**
+3. 响应格式与 3252B 一致：`[4B LE 长度][AES 密文 16B 对齐]`（2688=168×16）
+
+**给云端的闭环路径（按优先级）**：
+1. **反汇编响应解密函数**（Http.dll 内 SR_SHUB 响应解析路径）→ 确认响应 key 派生/固定 key
+   → 解 2692B 响应 → 拿 peers（加速器核心数据）
+2. **构造已知明文对**：云端用其 sandbox 的 crypt 实现（crypt_aes_key/crypt_data_package）
+   构造它自己的合法请求明文 + 发送 → 服务器响应密文 → 已知明文攻击恢复固定响应 key
+   （响应明文结构可通过反汇编响应解析函数获得）
+3. **篡改观察**：用户侧可做密文翻转实验（改 368B 某些字节重发）→ 服务器 200/4xx 分布
+   → 判断校验强度（补充情报，非必需）
+
+**本地工具链（均可交付/复用）**：
+- `dump_disasm.py`（minidump 模块定位 + 任意 RVA 反汇编，capstone）
+- `pe_iat_probe.py`（PE 导入/导出表解析 → IAT 槽运行时地址）
+- `extract_http_body.py` / `analyze_body.py` / `replay_body.py` / `rsa_probe.py` / `scan_paramstream_body.py`
