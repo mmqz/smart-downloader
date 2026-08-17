@@ -72,3 +72,23 @@
 - 遗留可用物：BT 协议层流样本（180.114.103.36:20011）可作"迅雷 BT 层 100% 标准"的后续 A 级实证（不影响主项目，主项目已按 libtorrent 纯标准实现）。
 
 **实测工具**：`scripts/research/capture_phub.ps1`（pktmon 全量抓包，UAC 自提权）+ `extract_phub_body.py`（纯标准库 pcapng 解析/TCP 重组）。真实抓包输出目录 `scripts/research/captures/` 已 gitignore（含用户网络流量，严禁入库）。
+
+## 8. 内存转储实证（2026-08-17 深夜，A 级升级）
+
+抓包被 TLS 拦截后改用**进程内存转储**（用户任务管理器 dump `DownloadSDKServer`，355MB；脚本 `scripts/research/scan_minidump.py` 本地扫描、自动脱敏，dump 文件不出本机）：
+
+**逆向研究关键结论逐一在真实进程内存中命中（实物存在性 A 级）**：
+| 逆向声称 | 内存实物 |
+|---|---|
+| QAClient 注册 QAClientPackage + XDL_QAClientPackageParser + UdpConnection.HubClient | ✅ 三字符串同现（0x33159cf 注册表区）；`QAClientPackage` 6 处、`XDL_QAClientPackageParser` 3 处 |
+| "POST / HTTP/1.1" + "Content-type: application/octet-stream" 模板 | ✅ 与 QAClientPackage/Parser 同区（0x11f66e13） |
+| PhubHttpPkgRequester 类 | ✅ MSVC RTTI `?AVPhubHttpPkgRequester@@` + `?AVPhubAllResHttpPkgRequester@@`（0x11fec8b7） |
+| XPF_ParamStream 系列序列化 API | ✅ 85 处符号：`XPF_ParamStreamWrite/ReadPointer/UInt32`、`BeginEnum`、`XPF_CreateParamStream[WithBindBuffer/WithBuffer]` |
+| ConfigHub 下发（AES/RSA 密钥来源） | ✅ 配置键名表：`ConfigHub/ConfigHubHost/ConfigHubPort/VersionIDFromCfgHUB` + **`UseRSA`**（0x11f427b3） |
+| PHub 主机/端口族 | ✅ `P2PHubHost/pr-phub.sandai.net`、`P2PHubIPv6Host/pr-v6-phub.sandai.net`、`P2PHubPort/P2PHubUdpPort`、`AllHubPort/MagnetHubPort/BTIndexHubPort/TrackerHubPort` |
+
+**新增情报**：`vip_dcdn_token`/`vip_dcdn_token_backup`/`equity_token`/`qaclient_maxpackagesize`/`qaclient_maxrecvsize`（PHub 参数名）；构建路径泄露 `D:\jenkinsAgent\...\Downloadlib_33.2`；`UdpConnection.HubClient` 提示 PHub 除 HTTP 外存在 **UDP 通道**（P2PHubUdpPort）。
+
+**结论**：逆向研究 B/C 级发现升级为 **A 级（真实进程实物）**；但 **QAClientPackage 序列化 body 明文未取得**（需堆追踪/注入/时序对齐，工程量大，且仍在"接入"成本线上）。**P3-C 结论维持**：协议存在性已 100% 实证，接入成本/风险不变——收益仍不匹配。**研究线正式关闭**（三轮方法：PoC 失败→抓包 TLS 拦截→内存实证，已成闭环）。
+
+**方法学沉淀（可复用）**：pktmon 免安装抓包 + minidump 本地扫描（脱敏），对任何"自家进程私有协议"研究适用；工具在 `scripts/research/`。
