@@ -24,6 +24,37 @@ async fn serve() -> (std::net::SocketAddr, Arc<DaemonState>) {
     (addr, state)
 }
 
+/// 添加任务（dest 指向独立临时目录，避免引擎把产物写到测试 CWD）。
+async fn add_task(
+    client: &reqwest::Client,
+    base: &str,
+    url: &str,
+) -> (reqwest::StatusCode, serde_json::Value) {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dest = std::env::temp_dir().join(format!("m6-test-{nanos}-{}", rand_suffix()));
+    let resp = client
+        .post(format!("{base}/tasks"))
+        .json(&serde_json::json!({ "url": url, "dest": dest.to_str().unwrap() }))
+        .send()
+        .await
+        .unwrap();
+    let status = resp.status();
+    let body = resp.json().await.unwrap_or(serde_json::Value::Null);
+    (status, body)
+}
+
+fn rand_suffix() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64
+        ^ std::process::id() as u64
+}
+
 #[tokio::test]
 async fn add_task_then_get_snapshot_and_list() {
     let body = patterned(64 * 1024);
@@ -32,14 +63,9 @@ async fn add_task_then_get_snapshot_and_list() {
     let base = format!("http://{addr}");
     let client = reqwest::Client::new();
 
-    let resp = client
-        .post(format!("{base}/tasks"))
-        .json(&serde_json::json!({ "url": srv.url() }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 201, "添加任务必须 201");
-    let created: serde_json::Value = resp.json().await.unwrap();
+    let resp = add_task(&client, &base, &srv.url()).await;
+    assert_eq!(resp.0, reqwest::StatusCode::CREATED, "添加任务必须 201");
+    let created = resp.1;
     let tid = created["task_id"].as_str().unwrap().to_string();
 
     // GET /tasks/:id 快照（跳号补拉入口）
@@ -73,21 +99,11 @@ async fn duplicate_add_rejected_with_event() {
     let base = format!("http://{addr}");
     let client = reqwest::Client::new();
 
-    let first = client
-        .post(format!("{base}/tasks"))
-        .json(&serde_json::json!({ "url": srv.url() }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(first.status(), 201);
+    let first = add_task(&client, &base, &srv.url()).await;
+    assert_eq!(first.0, reqwest::StatusCode::CREATED);
 
-    let second = client
-        .post(format!("{base}/tasks"))
-        .json(&serde_json::json!({ "url": srv.url() }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 409, "重复 canonical 必须拒绝");
+    let second = add_task(&client, &base, &srv.url()).await;
+    assert_eq!(second.0, reqwest::StatusCode::CONFLICT, "重复 canonical 必须拒绝");
 
     // DuplicateRejected 事件已发布（seq 递增）
     let drained = state.hub().drain();
@@ -111,16 +127,9 @@ async fn pause_resume_via_http() {
     let base = format!("http://{addr}");
     let client = reqwest::Client::new();
 
-    let resp = client
-        .post(format!("{base}/tasks"))
-        .json(&serde_json::json!({ "url": srv.url() }))
-        .send()
-        .await
-        .unwrap();
-    let tid = resp.json::<serde_json::Value>().await.unwrap()["task_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let resp = add_task(&client, &base, &srv.url()).await;
+    assert_eq!(resp.0, reqwest::StatusCode::CREATED);
+    let tid = resp.1["task_id"].as_str().unwrap().to_string();
 
     let p = client
         .post(format!("{base}/tasks/{tid}/pause"))
