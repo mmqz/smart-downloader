@@ -9,6 +9,7 @@ pub mod cli;
 pub mod events;
 pub mod health;
 pub mod http;
+pub mod lockfile;
 pub mod state;
 pub mod ws;
 
