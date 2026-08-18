@@ -134,3 +134,48 @@ equity_token=<REDACTED-25位数字>,token_mode=2,app_guid=<REDACTED>
 - `dump_disasm.py`（minidump 模块定位 + 任意 RVA 反汇编，capstone）
 - `pe_iat_probe.py`（PE 导入/导出表解析 → IAT 槽运行时地址）
 - `extract_http_body.py` / `analyze_body.py` / `replay_body.py` / `rsa_probe.py` / `scan_paramstream_body.py`
+
+## 11. 云端 v2 破解成果 · 本地实测反馈（2026-08-18 晚）
+
+云端交付 `phub_peer_accelerator_v2.zip`（算法：`AES_key = MD5(seq_no_LE || cmd_id_LE)`、
+AES-128-ECB、4 个 RSA-1024 服务公钥）。本地对**真实样本**逐项验证：
+
+**11.1 368B SHub 请求结构——实测精确确认（A 级）**
+```
+[0:8]   88 58 03 26 10 27 00 00    8B 头（cmd/flag/seq 区）
+[8:12]  80 00 00 00                ekey_size = 128（RSA-1024）
+[12:140] af 94 0a 31 ...           128B RSA 包裹的 AES key（ekey）
+[140:144] e0 00 00 00              aes_body_size = 224
+[144:368] ...                      224B AES 密文（14×16）
+```
+8+4+128+4+224 = **368 精确吻合**（云端 §3.3 的"差 4"猜测已修正）。
+→ **SHub 请求 = RSA ekey 路径，不是 MD5 派生**，符合云端 §3.3 暗示。
+
+**11.2 MD5(seq||cmd) 派生对 SHub 响应实测失败**
+- 用 368B 解出的全部 (cmd, seq) 候选组合（offset0/1/4/5 各种 LE/BE 变体）试解 2692B 响应：
+  **全部为高熵垃圾**，无可读明文 → SHub 响应同样走 RSA 会话 key，**非固定 MD5 key**。
+
+**11.3 PHub forge 实测被拒（关键情报）**
+- `pr-phub.sandai.net:80`（直连 180.163.56.147/123.182.51.211）对云端规格的
+  `13B 头 + MD5-AES` forge 包（含未加密对照）**一律返回 23B 明文**
+  `decrypt request failed.` → **PHub 很可能与 SHub 同构（RSA ekey）**，
+  MD5 派生仅在响应解密侧成立（需云端再验证 PhubHttpPkgRequester 是否含 ekey 组装）。
+
+**11.4 dump key 扫描无果**
+- minidump_scanner 在请求密文 ±4KB 提取 10000 候选 16B key 试解 2692B：无明文命中
+  （zlib 命中共 6 个全是误报小流）。
+- TLV 全扫 dump 2：仅小结构（≤56B），无响应解密明文残留 → 明文生命周期极短。
+
+**11.5 诚实结论（给云端）**
+- 结构破译、公钥分类、重放性 = **已闭环**；**解密 = 未闭环**。
+- 障碍：RSA 私钥（服务端持有）+ 响应 key 在客户端侧不可导出（非内存常驻明文）。
+- **客户端侧唯一可行路径 = 运行时 hook**：hook `XPF_AESDecryptBufferECB`
+  （P2PBase.dll @ RVA 0x1a8d0 附近）或 `XPF_MD5HashData`，在真实迅雷进程中
+  抓 (key, 密文, 明文) 三元组 → 一张真实会话即得加速器全部密钥材料（含响应明文 peers）。
+- 或云端反汇编 `PhubHttpPkgRequester` 请求组装确认 **是否 ekey 路径**（若 PHub
+  也为 ekey，则"MD5 派生 forge"整条线不可行，聚焦 hook 路线）。
+
+**本地新增工具**（`scripts/research/`，均可交付）：
+- `forge_phub_test.py`（forge + 直连 oracle 验证）
+- `try_key_orders.py`（key 顺序暴力 oracle，含明文对照）
+- `decrypt_2692_variants.py`（MD5 派生组合全试）
