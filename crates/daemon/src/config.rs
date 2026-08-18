@@ -91,6 +91,17 @@ impl Config {
             .clone()
             .unwrap_or_else(|| self.download.dest_root.clone())
     }
+
+    /// 精简配置快照（`GET /config` 返回；不含敏感项；serve 注入 + 热重载共用）。
+    pub fn snapshot_json(&self, tasks_path: &std::path::Path) -> serde_json::Value {
+        serde_json::json!({
+            "dest_root": self.download.dest_root,
+            "bt_save_path": self.bt_save_path(),
+            "bt_enabled": self.bt.enabled,
+            "listen_addr": self.server.addr,
+            "persist_path": tasks_path,
+        })
+    }
 }
 
 #[cfg(test)]

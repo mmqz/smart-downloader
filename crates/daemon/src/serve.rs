@@ -4,8 +4,8 @@ use crate::config::Config;
 use crate::http;
 use crate::lockfile::InstanceLock;
 use crate::state::DaemonState;
+use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(feature = "bt")]
 use std::time::Duration;
 
 #[derive(Debug, thiserror::Error)]
@@ -20,8 +20,9 @@ pub enum ServeError {
     Io(#[from] std::io::Error),
 }
 
-/// 运行 daemon（阻塞至 Ctrl+C / 服务错误）。
-pub async fn run(cfg: Config) -> Result<(), ServeError> {
+/// 运行 daemon（阻塞至 Ctrl+C / 服务错误）。`cfg_path` 为配置文件源路径（Some 时启用
+/// #6 TOML 热重载：5s 轮询变更 → 刷新可热更字段）。
+pub async fn run(cfg: Config, cfg_path: Option<PathBuf>) -> Result<(), ServeError> {
     // 1. 单实例锁（重复启动立即退出）
     let _lock = InstanceLock::acquire(&cfg.lock.path)?;
     tracing::info!("单实例锁已持有: {:?}", cfg.lock.path);
@@ -71,14 +72,8 @@ pub async fn run(cfg: Config) -> Result<(), ServeError> {
         }
     }
     state = state.with_storage(tasks_path.clone());
-    // 4b+. 注入生效配置快照（GET /config 返回；精简字段，不含敏感项）
-    state = state.with_config(serde_json::json!({
-        "dest_root": cfg.download.dest_root,
-        "bt_save_path": cfg.bt_save_path(),
-        "bt_enabled": cfg.bt.enabled,
-        "listen_addr": cfg.server.addr,
-        "persist_path": tasks_path,
-    }));
+    // 4b+. 注入生效配置快照（GET /config 返回；热重载后由 refresh_config 刷新）
+    state = state.with_config(Config::snapshot_json(&cfg, &tasks_path));
     if tasks_path.exists() {
         match state.restore_from(&tasks_path).await {
             Ok(n) => tracing::info!("已从 {tasks_path:?} 恢复 {n} 个任务"),
@@ -97,6 +92,36 @@ pub async fn run(cfg: Config) -> Result<(), ServeError> {
     };
     #[cfg(not(feature = "bt"))]
     let state_arc = Arc::new(state);
+
+    // 4d. #6 TOML 热重载：5s 轮询配置文件内容变更 → 解析 → refresh_config
+    // （默认落盘目录 + /config 快照刷新；解析失败保留旧配置并告警）。
+    if let Some(path) = cfg_path {
+        let st = state_arc.clone();
+        let tasks = tasks_path.clone();
+        let mut last = std::fs::read_to_string(&path).ok();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue; // 文件暂不可读（被编辑器暂存等）：下轮再试
+                };
+                if last.as_deref() == Some(text.as_str()) {
+                    continue;
+                }
+                match toml::from_str::<Config>(&text) {
+                    Ok(new_cfg) => {
+                        st.refresh_config(&new_cfg, &tasks);
+                        tracing::info!("配置热重载生效: {}", path.display());
+                        last = Some(text);
+                    }
+                    Err(e) => {
+                        tracing::warn!("配置热重载解析失败（保留旧配置）: {e}");
+                        last = Some(text); // 避免同一坏内容反复告警
+                    }
+                }
+            }
+        });
+    }
 
     // 5. 路由 + 监听
     let app = http::router(state_arc);

@@ -118,10 +118,11 @@ pub struct DaemonState {
     next_id: AtomicU64,
     /// 任务持久化文件（Some 时 add/remove/状态变更后自动落盘）。
     persist_path: Option<PathBuf>,
-    /// HTTP 任务默认落盘目录（dest 未指定时用；serve 从配置 `[download] dest_root` 注入）。
-    default_dest_root: PathBuf,
-    /// 生效配置快照（`GET /config` 返回；serve 注入精简字段）。
-    config_snapshot: Option<serde_json::Value>,
+    /// HTTP 任务默认落盘目录（dest 未指定时用；serve 从配置 `[download] dest_root` 注入；
+    /// Mutex 支持 #6 TOML 热重载动态更新）。
+    default_dest_root: Mutex<PathBuf>,
+    /// 生效配置快照（`GET /config` 返回；serve 注入精简字段；热重载后刷新）。
+    config_snapshot: Mutex<Option<serde_json::Value>>,
 }
 
 /// 持久化任务记录：`task`（含 source 原文：url/magnet/torrent 字节）+ 引擎种类。
@@ -153,20 +154,20 @@ impl DaemonState {
             providers,
             next_id: AtomicU64::new(1),
             persist_path: None,
-            default_dest_root: PathBuf::from("."),
-            config_snapshot: None,
+            default_dest_root: Mutex::new(PathBuf::from(".")),
+            config_snapshot: Mutex::new(None),
         }
     }
 
     /// 注入 HTTP 任务默认落盘目录（dest 未指定时使用；serve 从 `[download] dest_root` 传入）。
-    pub fn with_dest_root(mut self, default_dest_root: PathBuf) -> Self {
-        self.default_dest_root = default_dest_root;
+    pub fn with_dest_root(self, default_dest_root: PathBuf) -> Self {
+        *self.default_dest_root.lock().unwrap() = default_dest_root;
         self
     }
 
     /// 注入生效配置快照（`GET /config` 返回；serve 组装精简字段）。
-    pub fn with_config(mut self, snapshot: serde_json::Value) -> Self {
-        self.config_snapshot = Some(snapshot);
+    pub fn with_config(self, snapshot: serde_json::Value) -> Self {
+        *self.config_snapshot.lock().unwrap() = Some(snapshot);
         self
     }
 
@@ -489,8 +490,13 @@ impl DaemonState {
         }
         // B10：目标目录预检（创建/可写）；HTTP 大小在响应头才知 → 空间预检跳过
         // dest 未指定 → 默认落盘目录（serve 配置 dest_root；未注入时为 daemon cwd）
-        let dest =
-            dest_root.or_else(|| Some(self.default_dest_root.to_string_lossy().into_owned()));
+        let def = self
+            .default_dest_root
+            .lock()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let dest = dest_root.or(Some(def));
         let dest_root = ensure_dest_root(dest)?;
         let canonical = CanonicalId {
             kind: CanonicalKind::Http,
@@ -702,8 +708,27 @@ impl DaemonState {
     /// 生效配置快照（`GET /config` 返回；未注入时给出提示对象）。
     pub fn config_snapshot(&self) -> serde_json::Value {
         self.config_snapshot
+            .lock()
+            .unwrap()
             .clone()
             .unwrap_or_else(|| serde_json::json!({ "note": "配置快照未注入（serve 组装）" }))
+    }
+
+    /// #6 TOML 热重载应用：配置重读后刷新可热更字段（default_dest_root + /config 快照）。
+    /// 变更项记日志；不变项静默。
+    pub fn refresh_config(&self, cfg: &crate::config::Config, tasks_path: &std::path::Path) {
+        {
+            let mut def = self.default_dest_root.lock().unwrap();
+            let new_root = cfg.download.dest_root.clone();
+            if *def != new_root {
+                tracing::info!("配置热重载: dest_root {:?} → {:?}", *def, new_root);
+                *def = new_root;
+            }
+        }
+        let snap = crate::config::Config::snapshot_json(cfg, tasks_path);
+        if *self.config_snapshot.lock().unwrap() != Some(snap.clone()) {
+            *self.config_snapshot.lock().unwrap() = Some(snap);
+        }
     }
 }
 

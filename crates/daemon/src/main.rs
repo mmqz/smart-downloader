@@ -33,7 +33,7 @@ fn main() {
             }
         };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime 创建失败");
-        if let Err(e) = rt.block_on(serve::run(cfg)) {
+        if let Err(e) = rt.block_on(serve::run(cfg, cfg_path)) {
             eprintln!("daemon 退出: {e}");
             std::process::exit(1);
         }
