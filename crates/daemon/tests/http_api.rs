@@ -247,7 +247,7 @@ async fn thunder_link_decoded_and_added() {
     // thunder:// = base64("AA"+url+"ZZ") → 归一化后走 HTTP 引擎 → 201
     let body = patterned(16 * 1024);
     let srv = TestServer::start(body).await;
-    let (addr, state) = serve().await;
+    let (addr, _state) = serve().await;
     let base = format!("http://{addr}");
     let client = reqwest::Client::new();
 

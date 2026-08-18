@@ -47,6 +47,16 @@ pub struct TaskSummary {
     pub source: String,
 }
 
+/// BT alert 应用结果（task_id + 状态迁移 + 消息），供事件广播使用。
+#[cfg(feature = "bt")]
+#[derive(Clone, Debug)]
+pub struct BtAlertEffect {
+    pub task_id: String,
+    pub from: TaskState,
+    pub to: TaskState,
+    pub message: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DaemonError {
     #[error("duplicate task (existing: {0})")]
@@ -401,6 +411,42 @@ impl DaemonState {
             .map(|p| (p.name().to_string(), p.runtime()))
             .collect()
     }
+
+    /// 应用一条 BT alert 到匹配任务（engine_tid 大小写不敏感归一化比较）：
+    /// 状态迁移（`bt_events::transition_for`）+ 引擎缓存写入；返回效果供广播。
+    /// 无匹配任务或无迁移 → `None`（调用方丢弃该 alert）。
+    #[cfg(feature = "bt")]
+    pub fn apply_bt_alert(&self, a: &smart_dl_btcore::Alert) -> Option<BtAlertEffect> {
+        let ih_l = a.ih.to_ascii_lowercase();
+        let mut tasks = self.tasks.lock().unwrap();
+        for (id, rec) in tasks.iter_mut() {
+            if rec.engine_kind != EngineKind::Bt {
+                continue;
+            }
+            let Some(tid) = &rec.engine_tid else {
+                continue;
+            };
+            if tid.to_ascii_lowercase() != ih_l {
+                continue;
+            }
+            // 命中任务（每条 alert 至多匹配一个 rec）：无迁移 → 丢弃（`?` 提前返回 None）
+            let now = rec.task.state.clone();
+            let (from, to) = crate::bt_events::transition_for(&now, a)?;
+            rec.task.state = to.clone();
+            if let Some(es) = rec.engine_status.as_mut() {
+                if to == TaskState::Failed {
+                    es.error = Some(a.msg.clone());
+                }
+            }
+            return Some(BtAlertEffect {
+                task_id: id.clone(),
+                from,
+                to,
+                message: a.msg.clone(),
+            });
+        }
+        None
+    }
 }
 
 /// D34：canonical URL —— 剥离签名/token 参数后作为去重身份，使同一资源的
@@ -494,5 +540,163 @@ mod tests {
     fn fragment_and_path_unaffected() {
         let c = canonical_http_url("https://host/dir/file.bin?token=x&keep=1#frag");
         assert_eq!(c, "https://host/dir/file.bin?keep=1#frag");
+    }
+}
+
+/// BT alert 事件流单元测试（feature `bt`）：`transition_for` 迁移矩阵 + `apply_bt_alert`
+/// 匹配/缓存写入。不依赖真实 libtorrent 会话（手工构造 TaskRecord）。
+#[cfg(all(test, feature = "bt"))]
+mod bt_alert_tests {
+    use super::*;
+    use smart_dl_btcore::{Alert, AlertKind};
+
+    fn make_state_with(rec: TaskRecord) -> DaemonState {
+        let engine = smart_dl_httpdl::HttpEngine::new(reqwest::Client::new());
+        let state = DaemonState::new(Arc::new(engine), vec![]);
+        // 测试同 crate 内可访问私有 tasks 表
+        (*state.tasks.lock().unwrap()).insert(rec.task.id.clone(), rec);
+        state
+    }
+
+    fn bt_rec(state: TaskState, ih: &str) -> TaskRecord {
+        TaskRecord {
+            task: DownloadTask {
+                id: "t1".into(),
+                canonical_id: CanonicalId {
+                    kind: CanonicalKind::Bt,
+                    identity: ih.to_string(),
+                    validator: None,
+                    token_sensitive: false,
+                },
+                source: DownloadSource::Magnet(format!("magnet:?xt=urn:btih:{ih}")),
+                identity: ContentIdentity::SingleFile {
+                    size: 0,
+                    etag: None,
+                    sha256: None,
+                },
+                dest_root: PathBuf::from("."),
+                files: vec![],
+                acquisitions: vec![],
+                aggregate: Default::default(),
+                state,
+                retry: Default::default(),
+                created_at: std::time::Instant::now(),
+                metadata: TaskMetadata {
+                    name: None,
+                    added_at_unix: 0,
+                },
+            },
+            engine_tid: Some(ih.to_string()),
+            engine_kind: EngineKind::Bt,
+            engine_status: None,
+        }
+    }
+
+    #[test]
+    fn finished_alert_promotes_seeding() {
+        let state = make_state_with(bt_rec(TaskState::Downloading(EngineKind::Bt), "ABC123"));
+        let alert = Alert {
+            kind: AlertKind::State,
+            ih: "abc123".into(), // 大小写不同 → 归一化匹配
+            msg: "torrent finished downloading".into(),
+            at: 0,
+            resume_ready: false,
+        };
+        let eff = state.apply_bt_alert(&alert).unwrap();
+        assert_eq!(eff.from, TaskState::Downloading(EngineKind::Bt));
+        assert_eq!(eff.to, TaskState::Seeding);
+        let rec_lock = state.tasks.lock().unwrap();
+        let rec = rec_lock.get("t1").unwrap();
+        assert_eq!(rec.task.state, TaskState::Seeding, "任务记录状态必须落盘");
+    }
+
+    #[test]
+    fn finished_from_queued_also_promotes() {
+        // 任务还未被引擎快照驱动（仍 Queued）时，完成 alert 同样推进
+        let state = make_state_with(bt_rec(TaskState::Queued, "AABB"));
+        let alert = Alert {
+            kind: AlertKind::State,
+            ih: "aabb".into(),
+            msg: "torrent finished downloading".into(),
+            at: 0,
+            resume_ready: false,
+        };
+        let eff = state.apply_bt_alert(&alert).unwrap();
+        assert_eq!(eff.from, TaskState::Queued);
+        assert_eq!(eff.to, TaskState::Seeding);
+    }
+
+    #[test]
+    fn error_alert_fails_with_message() {
+        let state = make_state_with(bt_rec(TaskState::Downloading(EngineKind::Bt), "D9E8"));
+        let alert = Alert {
+            kind: AlertKind::State,
+            ih: "d9e8".into(),
+            msg: "torrent error: pex failed".into(),
+            at: 0,
+            resume_ready: false,
+        };
+        let eff = state.apply_bt_alert(&alert).unwrap();
+        assert_eq!(eff.to, TaskState::Failed);
+        assert_eq!(eff.message, "torrent error: pex failed");
+        let rec_lock = state.tasks.lock().unwrap();
+        let rec = rec_lock.get("t1").unwrap();
+        assert_eq!(rec.task.state, TaskState::Failed);
+    }
+
+    #[test]
+    fn paused_alert_ignored() {
+        // v1 不处理 Paused alert（pause 由 API 直调时同步发布事件）
+        let state = make_state_with(bt_rec(TaskState::Downloading(EngineKind::Bt), "P1"));
+        let alert = Alert {
+            kind: AlertKind::State,
+            ih: "p1".into(),
+            msg: "torrent paused".into(),
+            at: 0,
+            resume_ready: false,
+        };
+        assert!(state.apply_bt_alert(&alert).is_none());
+    }
+
+    #[test]
+    fn non_bt_task_ignored() {
+        // HTTP 任务（engine_kind=Http）不匹配 BT alert
+        let mut rec = bt_rec(TaskState::Downloading(EngineKind::Bt), "XT77");
+        rec.engine_kind = EngineKind::Http;
+        let state = make_state_with(rec);
+        let alert = Alert {
+            kind: AlertKind::State,
+            ih: "xt77".into(),
+            msg: "torrent finished downloading".into(),
+            at: 0,
+            resume_ready: false,
+        };
+        assert!(state.apply_bt_alert(&alert).is_none());
+    }
+
+    #[test]
+    fn unknown_ih_ignored() {
+        let state = make_state_with(bt_rec(TaskState::Downloading(EngineKind::Bt), "KN0WN"));
+        let alert = Alert {
+            kind: AlertKind::State,
+            ih: "na-".into(),
+            msg: "torrent finished downloading".into(),
+            at: 0,
+            resume_ready: false,
+        };
+        assert!(state.apply_bt_alert(&alert).is_none());
+    }
+
+    #[test]
+    fn peer_alert_ignored() {
+        let state = make_state_with(bt_rec(TaskState::Downloading(EngineKind::Bt), "PR99"));
+        let alert = Alert {
+            kind: AlertKind::Peer,
+            ih: "pr99".into(),
+            msg: "peer connected".into(),
+            at: 0,
+            resume_ready: false,
+        };
+        assert!(state.apply_bt_alert(&alert).is_none());
     }
 }
