@@ -95,6 +95,15 @@ pub struct BtAlertEffect {
     pub message: String,
 }
 
+/// HTTP 轮询推进结果（task_id + 状态迁移 + 消息），供事件广播使用。
+#[derive(Clone, Debug)]
+pub struct HttpPollEffect {
+    pub task_id: String,
+    pub from: TaskState,
+    pub to: TaskState,
+    pub message: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DaemonError {
     #[error("duplicate task (existing: {0})")]
@@ -801,6 +810,73 @@ impl DaemonState {
             });
         }
         None
+    }
+
+    /// HTTP 任务状态推进轮询：权威 = 引擎实时状态（v1 HTTP 引擎无 alert 回调，
+    /// 记录 state 此前停在 Queued——list 与 status 不一致）。每轮：
+    /// - 引擎终态（Completed/Error）→ 记录推进 Completed/Failed + 落盘；
+    /// - 引擎活跃（Downloading/MetadataPending）→ Queued 记录顺带推进 Downloading(Http)。
+    ///
+    /// 返回本批效果供事件广播；无变化的任务跳过。
+    pub async fn poll_http_task_states(&self) -> Vec<HttpPollEffect> {
+        // 先收集候选（锁外做引擎调用；避免长持锁）
+        let candidates: Vec<(String, EngineTaskId)> = {
+            let tasks = self.tasks.lock().unwrap();
+            tasks
+                .iter()
+                .filter(|(_, rec)| rec.engine_kind == EngineKind::Http)
+                .filter(|(_, rec)| {
+                    matches!(
+                        rec.task.state,
+                        TaskState::Queued | TaskState::Downloading(_)
+                    )
+                })
+                .filter_map(|(id, rec)| rec.engine_tid.clone().map(|t| (id.clone(), t)))
+                .collect()
+        };
+        let mut effects = Vec::new();
+        for (id, tid) in candidates {
+            let Ok(engine) = self.engine_for(EngineKind::Http) else {
+                continue;
+            };
+            // 引擎侧已移除/不可用 → 跳过（任务移除后轮询器自然停）
+            let Ok(st) = engine.status(&tid).await else {
+                continue;
+            };
+            let (from, to) = {
+                let mut tasks = self.tasks.lock().unwrap();
+                let Some(rec) = tasks.get_mut(&id) else {
+                    continue;
+                };
+                // 双检：轮询间隙状态可能已被别处推进（remove/pause/恢复）
+                if !matches!(
+                    rec.task.state,
+                    TaskState::Queued | TaskState::Downloading(_)
+                ) {
+                    continue;
+                }
+                let from = rec.task.state.clone();
+                let to = engine_state_to_task(&st.state, EngineKind::Http);
+                if to == from {
+                    continue; // 已在目标态（活跃→活跃、终态已推等）
+                }
+                rec.task.state = to.clone();
+                if let Some(es) = rec.engine_status.as_mut() {
+                    if to == TaskState::Failed {
+                        es.error = st.error.clone();
+                    }
+                }
+                self.autosave(); // 终态/推进落盘
+                (from, to)
+            };
+            effects.push(HttpPollEffect {
+                task_id: id,
+                from,
+                to,
+                message: st.error.clone().unwrap_or_default(),
+            });
+        }
+        effects
     }
 }
 

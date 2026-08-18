@@ -11,6 +11,7 @@ pub mod config;
 pub mod events;
 pub mod health;
 pub mod http;
+pub mod http_events;
 pub mod lockfile;
 pub mod serve;
 pub mod state;

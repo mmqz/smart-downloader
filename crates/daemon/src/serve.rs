@@ -93,6 +93,11 @@ pub async fn run(cfg: Config, cfg_path: Option<PathBuf>) -> Result<(), ServeErro
     #[cfg(not(feature = "bt"))]
     let state_arc = Arc::new(state);
 
+    // 4c+. HTTP 状态推进循环（list 状态准确化）：2s 轮询引擎终态 → 记录推进 +
+    // 事件广播（v1 HTTP 引擎无 alert 回调，记录 state 此前停留 Queued）
+    let _http_events_handle =
+        crate::http_events::spawn_http_events(state_arc.clone(), Duration::from_secs(2));
+
     // 4d. #6 TOML 热重载：5s 轮询配置文件内容变更 → 解析 → refresh_config
     // （默认落盘目录 + /config 快照刷新；解析失败保留旧配置并告警）。
     if let Some(path) = cfg_path {

@@ -187,8 +187,9 @@ impl CliClient {
         Ok(())
     }
 
-    /// 非 2xx → 提取 {error} 转 Err；json 模式打印响应体；否则静默（动作输出由调用方打印）。
-    async fn check(&self, resp: reqwest::Response, json: bool) -> Result<(), CliError> {
+    /// 非 2xx → 提取 {error} 转 Err；body 非空即打印（json 模式原样输出，人读模式
+    /// 也可见——config/logs 的可读结果）。`_json` 保留签名（未来格式化用）。
+    async fn check(&self, resp: reqwest::Response, _json: bool) -> Result<(), CliError> {
         let resp = ensure_ok(resp).await?;
         let text = resp
             .text()

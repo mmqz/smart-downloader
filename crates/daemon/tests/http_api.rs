@@ -26,16 +26,19 @@ async fn serve() -> (std::net::SocketAddr, Arc<DaemonState>) {
 }
 
 /// 添加任务（dest 指向独立临时目录，避免引擎把产物写到测试 CWD）。
+/// dest 用 进程号+计数器 保证唯一（并行测试下 nanos 会碰撞——曾致 400）。
 async fn add_task(
     client: &reqwest::Client,
     base: &str,
     url: &str,
 ) -> (reqwest::StatusCode, serde_json::Value) {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dest = std::env::temp_dir().join(format!("m6-test-{nanos}-{}", rand_suffix()));
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static DEST_SEQ: AtomicU64 = AtomicU64::new(0);
+    let dest = std::env::temp_dir().join(format!(
+        "m6-test-{}-{}",
+        std::process::id(),
+        DEST_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     let resp = client
         .post(format!("{base}/tasks"))
         .json(&serde_json::json!({ "url": url, "dest": dest.to_str().unwrap() }))
@@ -45,15 +48,6 @@ async fn add_task(
     let status = resp.status();
     let body = resp.json().await.unwrap_or(serde_json::Value::Null);
     (status, body)
-}
-
-fn rand_suffix() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64
-        ^ std::process::id() as u64
 }
 
 #[tokio::test]
@@ -390,4 +384,160 @@ async fn fallback_returns_501_not_implemented() {
         body["error"].as_str().unwrap().contains("fallback"),
         "错误信息应含 fallback: {body}"
     );
+}
+
+/// 等任务快照 state（引擎状态映射）到目标值（最长 10s）。
+async fn wait_snapshot_state(state: &Arc<DaemonState>, id: &str, want: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if let Some(s) = state.task_snapshot(id).await {
+            if s.state == want {
+                return;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "10s 内未到 {want}: {id}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// 等 list（记录 state——HTTP 状态推进循环写入）到目标值（最长 10s）。
+async fn wait_list_state(client: &reqwest::Client, base: &str, id: &str, want: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let list: Vec<serde_json::Value> = client
+            .get(format!("{base}/tasks"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if let Some(t) = list.iter().find(|t| t["task_id"] == id) {
+            if t["state"] == want {
+                return;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "10s 内 list 未到 {want}: {id}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// 等事件中枢出现匹配事件（轮询 drain；最长 10s）。
+async fn wait_event(
+    state: &Arc<DaemonState>,
+    want: impl Fn(&SchedulerEvent) -> bool,
+) -> Vec<smart_dl_daemon::events::Envelope> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let drained = state.hub().drain();
+        if drained.iter().any(|e| want(&e.event)) {
+            return drained;
+        }
+        assert!(std::time::Instant::now() < deadline, "10s 内未等到目标事件");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// HTTP 终态推进（serve 装配路径）：http_events 循环轮询 → 记录推进 → list 显示
+/// Completed + 事件广播；二次轮询无效果（幂等，不重复广播）。
+#[tokio::test]
+async fn http_task_completed_advances_list_state() {
+    let body = patterned(64 * 1024);
+    let srv = TestServer::start(body).await;
+    let (addr, state) = serve().await;
+    // serve 装配：状态推进循环（测试用 100ms 加速轮询）
+    let _h = smart_dl_daemon::http_events::spawn_http_events(
+        state.clone(),
+        std::time::Duration::from_millis(100),
+    );
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+    let (status, b) = add_task(&client, &base, &srv.url()).await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "add 应 201: {b}");
+    let tid = b["task_id"].as_str().unwrap().to_string();
+
+    // 引擎先完成（快照实时化）→ 循环把记录推进 Completed → list 与 status 一致
+    wait_snapshot_state(&state, &tid, "Completed").await;
+    wait_list_state(&client, &base, &tid, "Completed").await;
+    // 事件广播（Completed + StateChanged）
+    wait_event(
+        &state,
+        |e| matches!(e, SchedulerEvent::Completed { task_id } if task_id == &tid),
+    )
+    .await;
+    // 幂等：再轮询无新效果（不会重复推进/广播）
+    let again = state.poll_http_task_states().await;
+    assert!(again.is_empty(), "已终态任务不应重复推进: {again:?}");
+}
+
+/// HTTP 失败推进：引擎 Error → 记录 Failed → list 显示 Failed + Failed 事件 + error。
+/// 脆弱服务器：首个请求（probe bytes=0-0）206 通过预检 → 后续下载请求 500（运行期失败）。
+#[tokio::test]
+async fn http_task_failure_marks_failed_in_list() {
+    use axum::{
+        body::Body,
+        http::HeaderMap,
+        response::{IntoResponse, Response},
+        routing::get,
+        Router,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let frag = hits.clone();
+    let app = Router::new().route(
+        "/fragile",
+        get(move |_h: HeaderMap| async move {
+            let n = frag.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                Response::builder()
+                    .status(206)
+                    .header("Content-Range", "bytes 0-0/4096")
+                    .header("Accept-Ranges", "bytes")
+                    .header("Content-Length", "1")
+                    .body(Body::from(vec![0u8; 1]))
+                    .unwrap()
+                    .into_response()
+            } else {
+                Response::builder()
+                    .status(500)
+                    .body(Body::empty())
+                    .unwrap()
+                    .into_response()
+            }
+        }),
+    );
+    let frag_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let frag_addr = frag_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(frag_listener, app).await.unwrap();
+    });
+
+    let (addr, state) = serve().await;
+    let _h = smart_dl_daemon::http_events::spawn_http_events(
+        state.clone(),
+        std::time::Duration::from_millis(100),
+    );
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+    let (status, b) = add_task(&client, &base, &format!("http://{frag_addr}/fragile")).await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "add 应 201: {b}");
+    let tid = b["task_id"].as_str().unwrap().to_string();
+
+    wait_snapshot_state(&state, &tid, "Failed").await;
+    wait_list_state(&client, &base, &tid, "Failed").await;
+    // Failed 事件广播
+    wait_event(
+        &state,
+        |e| matches!(e, SchedulerEvent::Failed { task_id, .. } if task_id == &tid),
+    )
+    .await;
+    // 幂等
+    let again = state.poll_http_task_states().await;
+    assert!(again.is_empty(), "已 Failed 任务不应重复推进: {again:?}");
 }
