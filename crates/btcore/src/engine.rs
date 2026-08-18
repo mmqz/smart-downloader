@@ -119,6 +119,16 @@ impl BtCore {
         self.sess.err_str().unwrap_or_else(|_| "?".into())
     }
 
+    /// 全局网络策略：代理（可选） + 下载/上传限速（KiB/s）。见 `crate::ffi::parse_proxy`。
+    pub fn apply_network(
+        &self,
+        proxy: Option<&crate::ffi::ProxyCfg>,
+        down_kb_s: u32,
+        up_kb_s: u32,
+    ) -> ffi::Result<()> {
+        self.sess.apply_network(proxy, down_kb_s, up_kb_s)
+    }
+
     // —— 添加 / 移除 ——
 
     pub fn add_magnet(&self, magnet: &str, web_seeds: &[String]) -> ffi::Result<String> {

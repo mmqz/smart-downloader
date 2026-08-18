@@ -32,8 +32,23 @@ pub async fn run(cfg: Config, cfg_path: Option<PathBuf>) -> Result<(), ServeErro
         .map_err(|e| ServeError::Engine(format!("dest_root 预检失败: {e}")))?;
 
     // 3. 引擎组装：HTTP（必需）+ BT（feature bt 且配置开启）
-    let http_engine: Arc<dyn smart_dl_core::types::DownloadEngine> =
-        Arc::new(smart_dl_httpdl::HttpEngine::new(reqwest::Client::new()));
+    // 全局代理（config `[download] proxy`，启动时生效）：http/socks5/socks4，可带凭据
+    let mut client_builder = reqwest::Client::builder();
+    if !cfg.download.proxy.is_empty() {
+        let proxy = reqwest::Proxy::all(&cfg.download.proxy)
+            .map_err(|e| ServeError::Engine(format!("代理解析失败: {e}")))?;
+        if let Some(auth) = proxy_auth_of(&cfg.download.proxy) {
+            client_builder = client_builder.proxy(proxy.basic_auth(&auth.0, &auth.1));
+        } else {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder
+        .build()
+        .map_err(|e| ServeError::Engine(format!("HTTP client 构建失败: {e}")))?;
+    let http_engine: Arc<dyn smart_dl_core::types::DownloadEngine> = Arc::new(
+        smart_dl_httpdl::HttpEngine::new_limited(client, cfg.download.max_download_kb_s),
+    );
     #[cfg(feature = "bt")]
     let mut state =
         DaemonState::new(http_engine, vec![]).with_dest_root(cfg.download.dest_root.clone());
@@ -48,7 +63,13 @@ pub async fn run(cfg: Config, cfg_path: Option<PathBuf>) -> Result<(), ServeErro
             let save = cfg.bt_save_path();
             std::fs::create_dir_all(&save)
                 .map_err(|e| ServeError::Engine(format!("BT 落盘目录创建失败 {save:?}: {e}")))?;
-            let bt = crate::bt::BtEngine::new(&save).map_err(ServeError::Engine)?;
+            let bt = crate::bt::BtEngine::new(
+                &save,
+                Some(cfg.download.proxy.as_str()),
+                cfg.download.max_download_kb_s,
+                cfg.bt.max_upload_kb_s,
+            )
+            .map_err(ServeError::Engine)?;
             let core = bt.core(); // Arc<BtCore>：alert 轮询句柄（trait 化前保存）
             let bt_arc: Arc<dyn smart_dl_core::types::DownloadEngine> = Arc::new(bt);
             state = state.with_bt(bt_arc);
@@ -156,6 +177,15 @@ pub async fn run(cfg: Config, cfg_path: Option<PathBuf>) -> Result<(), ServeErro
     }
 
     Ok(())
+}
+
+/// 从代理 URL 提取 `user:pass@`（HTTP 引擎 reqwest basic_auth 用；BT 引擎由
+/// btcore::parse_proxy 解析同一格式）。无凭据 → None。
+fn proxy_auth_of(url: &str) -> Option<(String, String)> {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let (auth, _) = rest.rsplit_once('@')?;
+    let (u, p) = auth.split_once(':').unwrap_or((auth, ""));
+    Some((u.to_string(), p.to_string()))
 }
 
 /// 进程参数：`serve [--config <path>]`。

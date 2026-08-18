@@ -31,6 +31,15 @@ lt_err lt_session_new(const char* save_path, const char* session_id, lt_session*
 void   lt_session_free(lt_session* s);
 lt_err lt_err_str(lt_session* s, char* buf, size_t cap, size_t* out_len); /* 最近一次错误人类可读 */
 
+/* —— 全局网络策略（代理 + 速率）——
+   proxy_type: 0=none 1=socks4 2=socks5 3=socks5+pw 4=http 5=http+pw（对齐 settings_pack）
+   proxy_host/proxy_user/proxy_pass 可 NULL；proxy_port 忽略当 type=0。
+   down_bytes/up_bytes: ≤0 表示不修改该项（bytes/s；0 本身 = 不限速）。 */
+lt_err lt_apply_network(lt_session* s,
+                        int proxy_type, const char* proxy_host, int proxy_port,
+                        const char* proxy_user, const char* proxy_pass,
+                        int64_t down_bytes, int64_t up_bytes);
+
 /* —— 添加/移除（5）—— */
 lt_err lt_add_magnet(lt_session* s, const char* magnet, const char** web_seeds, char* ih_out /*41 字节*/);
 lt_err lt_add_torrent_file(lt_session* s, const uint8_t* meta, size_t len, const char** web_seeds, char* ih_out);

@@ -9,6 +9,7 @@ extern crate self as httpdl;
 pub mod download;
 pub mod engine;
 pub mod range;
+pub mod rate;
 pub mod resume;
 pub mod retry;
 pub mod static_split;

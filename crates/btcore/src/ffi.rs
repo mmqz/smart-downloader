@@ -65,6 +65,83 @@ fn call<T>(code: c_int, f: impl FnOnce() -> Result<T>) -> Result<T> {
     }
 }
 
+/// 代理类型（对齐 libtorrent settings_pack::proxy_type 1..5）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyType {
+    Socks4 = 1,
+    Socks5 = 2,
+    Socks5Auth = 3,
+    Http = 4,
+    HttpAuth = 5,
+}
+
+/// 解析后的代理配置（供 `apply_network`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyCfg {
+    pub kind: ProxyType,
+    pub host: String,
+    pub port: u16,
+    pub user: Option<String>,
+    pub pass: Option<String>,
+}
+
+/// 解析代理 URL：`http://host:port` / `socks5://host:port` / `socks4://host:port`，
+/// 可选 `user:pass@`（IPv6 字面量支持 `[::1]:port`）。默认端口 1080。
+pub fn parse_proxy(url: &str) -> Result<ProxyCfg> {
+    let (scheme, rest) = url.split_once("://").ok_or(Error::Arg)?;
+    let kind = match scheme {
+        "http" => ProxyType::Http,
+        "socks5" => ProxyType::Socks5,
+        "socks4" => ProxyType::Socks4,
+        _ => return Err(Error::Arg),
+    };
+    let (auth, hostport) = match rest.rsplit_once('@') {
+        Some((a, h)) => {
+            let (u, p) = a.split_once(':').unwrap_or((a, ""));
+            (Some((u.to_string(), p.to_string())), h)
+        }
+        None => (None, rest),
+    };
+    let (host, port) = if let Some(stripped) = hostport.strip_prefix('[') {
+        let end = stripped.find(']').ok_or(Error::Arg)?;
+        let host = &stripped[..end];
+        let after = &stripped[end + 1..];
+        let port = after
+            .strip_prefix(':')
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(1080);
+        (host.to_string(), port)
+    } else if let Some((h, p)) = hostport.rsplit_once(':') {
+        let port: u16 = p.parse().map_err(|_| Error::Arg)?;
+        (h.to_string(), port)
+    } else {
+        (hostport.to_string(), 1080)
+    };
+    let (user, pass) = match auth {
+        Some((u, p)) => (Some(u), Some(p)),
+        None => (None, None),
+    };
+    if rest.is_empty() || host.is_empty() {
+        return Err(Error::Arg);
+    }
+    let mut kind = kind;
+    // 凭据 → 切到带认证类型
+    if user.is_some() {
+        kind = match kind {
+            ProxyType::Socks5 => ProxyType::Socks5Auth,
+            ProxyType::Http => ProxyType::HttpAuth,
+            other => other,
+        };
+    }
+    Ok(ProxyCfg {
+        kind,
+        host,
+        port,
+        user,
+        pass,
+    })
+}
+
 impl Session {
     pub fn new(save_path: &Path, session_id: &str) -> Result<Self> {
         let sp = cstr(&save_path.to_string_lossy())?;
@@ -75,6 +152,47 @@ impl Session {
             return Err(Error::from(code));
         }
         Ok(Session { raw })
+    }
+
+    /// 全局网络策略：代理（可选）+ 下载/上传限速（KiB/s；0 = 不限/不设置由调用方控制）。
+    pub fn apply_network(
+        &self,
+        proxy: Option<&ProxyCfg>,
+        down_kb_s: u32,
+        up_kb_s: u32,
+    ) -> Result<()> {
+        let (ptype, phost, pport, puser, ppass): (
+            i32,
+            Option<CString>,
+            i32,
+            Option<CString>,
+            Option<CString>,
+        ) = match proxy {
+            Some(p) => (
+                p.kind as i32,
+                Some(cstr(&p.host)?),
+                p.port as i32,
+                p.user.as_deref().map(cstr).transpose()?,
+                p.pass.as_deref().map(cstr).transpose()?,
+            ),
+            None => (0, None, 0, None, None),
+        };
+        let host_ptr = phost.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+        let user_ptr = puser.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+        let pass_ptr = ppass.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+        let code = unsafe {
+            lt_apply_network(
+                self.raw,
+                ptype,
+                host_ptr,
+                pport,
+                user_ptr,
+                pass_ptr,
+                down_kb_s as i64 * 1024,
+                up_kb_s as i64 * 1024,
+            )
+        };
+        call(code, || Ok(()))
     }
 
     /// 最近一次错误（内核侧维护的人类可读文本）
@@ -445,4 +563,50 @@ fn zeroed_peers(cap: usize) -> Vec<lt_peer> {
         flags: 0,
     };
     vec![p; cap]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_proxy_socks5_default_port() {
+        let c = parse_proxy("socks5://127.0.0.1:1080").unwrap();
+        assert_eq!(c.kind, ProxyType::Socks5);
+        assert_eq!(c.host, "127.0.0.1");
+        assert_eq!(c.port, 1080);
+        assert!(c.user.is_none());
+    }
+
+    #[test]
+    fn parse_proxy_http_with_credentials() {
+        let c = parse_proxy("http://user:pass@proxy.example.com").unwrap();
+        assert_eq!(c.kind, ProxyType::HttpAuth, "凭据 → HttpAuth");
+        assert_eq!(c.host, "proxy.example.com");
+        assert_eq!(c.port, 1080, "未给端口默认 1080");
+        assert_eq!(c.user.as_deref(), Some("user"));
+        assert_eq!(c.pass.as_deref(), Some("pass"));
+    }
+
+    #[test]
+    fn parse_proxy_socks4_isolation() {
+        let c = parse_proxy("socks4://1.2.3.4:9999").unwrap();
+        assert_eq!(c.kind, ProxyType::Socks4);
+        assert_eq!(c.port, 9999);
+    }
+
+    #[test]
+    fn parse_proxy_ipv6_literal() {
+        let c = parse_proxy("socks5://[::1]:1081").unwrap();
+        assert_eq!(c.host, "::1");
+        assert_eq!(c.port, 1081);
+    }
+
+    #[test]
+    fn parse_proxy_bad_scheme_or_shape_errors() {
+        assert!(parse_proxy("ftp://x:1").is_err(), "未知 scheme");
+        assert!(parse_proxy("socks5://").is_err(), "空");
+        assert!(parse_proxy("no-scheme").is_err(), "无 scheme");
+        assert!(parse_proxy("socks5://h:notaport").is_err(), "坏端口");
+    }
 }

@@ -26,6 +26,12 @@ pub struct ServerCfg {
 pub struct DownloadCfg {
     /// 默认下载落盘根目录（三 add 入口的 dest 缺省值）。
     pub dest_root: PathBuf,
+    /// 全局代理（HTTP 引擎 + BT 引擎共用）：`http://host:port` / `socks5://host:port` /
+    /// `socks4://host:port`（BT 支持带凭据 `user:pass@`）；空 = 直连。启动时生效
+    /// （proxy 不参与热重载，避免重建连接）。敏感项：不出现在 `/config` 快照。
+    pub proxy: String,
+    /// 全局下载限速（KiB/s，HTTP + BT 共用）；0 = 不限。启动时生效。
+    pub max_download_kb_s: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -35,6 +41,8 @@ pub struct BtCfg {
     pub enabled: bool,
     /// BT 落盘目录（须存在；默认与 dest_root 相同）。
     pub save_path: Option<PathBuf>,
+    /// BT 上传限速（KiB/s）；0 = 不限。启动时生效。
+    pub max_upload_kb_s: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -59,10 +67,13 @@ impl Default for Config {
             },
             download: DownloadCfg {
                 dest_root: PathBuf::from("./downloads"),
+                proxy: String::new(),
+                max_download_kb_s: 0,
             },
             bt: BtCfg {
                 enabled: true,
                 save_path: None,
+                max_upload_kb_s: 0,
             },
             lock: LockCfg {
                 path: PathBuf::from("./daemon.lock"),
@@ -92,7 +103,8 @@ impl Config {
             .unwrap_or_else(|| self.download.dest_root.clone())
     }
 
-    /// 精简配置快照（`GET /config` 返回；不含敏感项；serve 注入 + 热重载共用）。
+    /// 精简配置快照（`GET /config` 返回；不含敏感项——proxy 可能带凭据故隐藏；
+    /// serve 注入 + 热重载共用）。
     pub fn snapshot_json(&self, tasks_path: &std::path::Path) -> serde_json::Value {
         serde_json::json!({
             "dest_root": self.download.dest_root,
@@ -100,6 +112,9 @@ impl Config {
             "bt_enabled": self.bt.enabled,
             "listen_addr": self.server.addr,
             "persist_path": tasks_path,
+            "max_download_kb_s": self.download.max_download_kb_s,
+            "max_upload_kb_s": self.bt.max_upload_kb_s,
+            "proxy_enabled": !self.download.proxy.is_empty(),
         })
     }
 }
@@ -130,10 +145,13 @@ addr = "0.0.0.0:9999"
 
 [download]
 dest_root = "/data/dl"
+proxy = "socks5://u:p@127.0.0.1:1080"
+max_download_kb_s = 2048
 
 [bt]
 enabled = false
 save_path = "/data/bt"
+max_upload_kb_s = 512
 
 [lock]
 path = "/tmp/sd.lock"
@@ -143,9 +161,21 @@ path = "/tmp/sd.lock"
         let c = Config::load(Some(&p)).unwrap();
         assert_eq!(c.server.addr, "0.0.0.0:9999");
         assert_eq!(c.download.dest_root, PathBuf::from("/data/dl"));
+        assert_eq!(c.download.proxy, "socks5://u:p@127.0.0.1:1080");
+        assert_eq!(c.download.max_download_kb_s, 2048);
         assert!(!c.bt.enabled);
         assert_eq!(c.bt_save_path(), PathBuf::from("/data/bt"));
+        assert_eq!(c.bt.max_upload_kb_s, 512);
         assert_eq!(c.lock.path, PathBuf::from("/tmp/sd.lock"));
+        // 快照：含限速、代理仅暴露开关（不泄露凭据）
+        let snap = c.snapshot_json(&PathBuf::from("/tmp/tasks.json"));
+        assert_eq!(snap["max_download_kb_s"], 2048);
+        assert_eq!(snap["max_upload_kb_s"], 512);
+        assert!(snap["proxy_enabled"].as_bool().unwrap());
+        assert!(
+            !snap.as_object().unwrap().contains_key("proxy"),
+            "快照不得含代理 URL"
+        );
     }
 
     #[test]

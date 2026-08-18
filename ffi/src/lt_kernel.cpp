@@ -209,6 +209,31 @@ lt_err lt_session_new(const char* save_path, const char* /*session_id*/, lt_sess
 
 void lt_session_free(lt_session* s) { delete s; }
 
+lt_err lt_apply_network(lt_session* s,
+                        int proxy_type_in, const char* proxy_host_in, int proxy_port_in,
+                        const char* proxy_user_in, const char* proxy_pass_in,
+                        int64_t down_bytes, int64_t up_bytes) {
+    if (!s) return LT_ERR_ARG;
+    try {
+        lt::settings_pack sp;
+        if (proxy_type_in > 0 && proxy_host_in && proxy_host_in[0]) {
+            sp.set_int(lt::settings_pack::proxy_type, proxy_type_in);
+            sp.set_str(lt::settings_pack::proxy_hostname, proxy_host_in);
+            sp.set_int(lt::settings_pack::proxy_port, proxy_port_in);
+            if (proxy_user_in && proxy_user_in[0]) sp.set_str(lt::settings_pack::proxy_username, proxy_user_in);
+            if (proxy_pass_in && proxy_pass_in[0]) sp.set_str(lt::settings_pack::proxy_password, proxy_pass_in);
+        } else {
+            sp.set_int(lt::settings_pack::proxy_type, 0);
+        }
+        if (down_bytes > 0) sp.set_int(lt::settings_pack::download_rate_limit, static_cast<int>(down_bytes));
+        if (up_bytes > 0) sp.set_int(lt::settings_pack::upload_rate_limit, static_cast<int>(up_bytes));
+        s->ses.apply_settings(sp);
+        return LT_OK;
+    } catch (...) {
+        return LT_ERR_ENGINE;
+    }
+}
+
 lt_err lt_add_magnet(lt_session* s, const char* magnet, const char** web_seeds, char* ih_out) {
     if (!s || !magnet || !ih_out) return LT_ERR_ARG;
     try {

@@ -3,6 +3,7 @@
 
 use crate::download::download_segments;
 use crate::range::probe_range;
+use crate::rate::RateLimiter;
 use crate::resume;
 use crate::static_split::{plan_segments, plan_segments_from};
 use crate::verify::verify_file;
@@ -50,13 +51,22 @@ struct EngineInner {
 #[derive(Clone)]
 pub struct HttpEngine {
     client: reqwest::Client,
+    /// 跨段共享限速器（0 = 不限）。
+    limiter: Arc<RateLimiter>,
     inner: Arc<EngineInner>,
 }
 
 impl HttpEngine {
+    /// 不限速引擎（默认路径，兼容既有测试）。
     pub fn new(client: reqwest::Client) -> Self {
+        Self::new_limited(client, 0)
+    }
+
+    /// `download_kb_s` = 全局下载限速 KiB/s（0 = 不限）。
+    pub fn new_limited(client: reqwest::Client, download_kb_s: u32) -> Self {
         HttpEngine {
             client,
+            limiter: Arc::new(RateLimiter::new(download_kb_s)),
             inner: Arc::new(EngineInner {
                 tasks: Mutex::new(HashMap::new()),
             }),
@@ -66,15 +76,17 @@ impl HttpEngine {
     /// 启动下载循环（代次 gen）。
     fn spawn_download(&self, tid: EngineTaskId, gen: u64) {
         let client = self.client.clone();
+        let limiter = self.limiter.clone();
         let inner = self.inner.clone();
         tokio::spawn(async move {
-            download_loop(&client, inner, tid, gen).await;
+            download_loop(&client, limiter, inner, tid, gen).await;
         });
     }
 }
 
 async fn download_loop(
     client: &reqwest::Client,
+    limiter: Arc<RateLimiter>,
     inner: Arc<EngineInner>,
     tid: EngineTaskId,
     gen: u64,
@@ -96,7 +108,7 @@ async fn download_loop(
             )
         };
 
-        match download_segments(client, &part, &segments, &mirrors, total).await {
+        match download_segments(client, &part, &segments, &mirrors, total, limiter.clone()).await {
             Ok(()) => {
                 // finalize 前检查代次：换源已发生 → 本循环结果作废（gen1 会重下）
                 let still_current = inner

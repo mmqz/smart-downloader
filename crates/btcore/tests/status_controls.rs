@@ -79,7 +79,7 @@ fn status_metrics_and_geometry() {
     // 形状：128 pieces；bitfield 16 字节全 1
     assert_eq!(c.piece_count(&ih).expect("pieces"), PIECES as i32);
     let bf = c.bitfield(&ih).expect("bitfield");
-    assert_eq!(bf.len(), (PIECES + 7) / 8, "bitfield 字节数");
+    assert_eq!(bf.len(), PIECES.div_ceil(8), "bitfield 字节数");
     assert!(
         bf.iter().all(|&b| b == 0xFF),
         "完成后 bitfield 全 1: {:?}",

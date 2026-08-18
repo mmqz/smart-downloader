@@ -201,6 +201,18 @@ unsafe extern "C" {
     ) -> lt_err;
 }
 unsafe extern "C" {
+    pub fn lt_apply_network(
+        s: *mut lt_session,
+        proxy_type: ::std::os::raw::c_int,
+        proxy_host: *const ::std::os::raw::c_char,
+        proxy_port: ::std::os::raw::c_int,
+        proxy_user: *const ::std::os::raw::c_char,
+        proxy_pass: *const ::std::os::raw::c_char,
+        down_bytes: i64,
+        up_bytes: i64,
+    ) -> lt_err;
+}
+unsafe extern "C" {
     pub fn lt_add_magnet(
         s: *mut lt_session,
         magnet: *const ::std::os::raw::c_char,

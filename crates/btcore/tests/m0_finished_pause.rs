@@ -64,14 +64,12 @@ fn torrent_finished_then_pause_ordering() {
     }
 
     let fin = saw_finished_idx.expect("torrent_finished alert 未出现");
-    let pau = saw_paused_idx.expect(&format!(
+    let paused_msg = format!(
         "torrent_paused alert 未出现（10s 内）; 状态={:?}; 收集={:?}",
-        session
-            .status(&ih)
-            .map(|(p, s)| (p, s))
-            .unwrap_or((-1.0, -1)),
+        session.status(&ih).unwrap_or((-1.0, -1)),
         collected
-    ));
+    );
+    let pau = saw_paused_idx.expect(&paused_msg);
     assert!(
         fin < pau,
         "torrent_finished(idx={}) 必须先于 torrent_paused(idx={})  全部: {:?}",

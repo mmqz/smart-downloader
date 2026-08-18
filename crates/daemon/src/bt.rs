@@ -70,11 +70,28 @@ pub struct BtEngine {
 
 impl BtEngine {
     /// 新建 BT 会话（save_path 为全局落盘目录，须已存在）。
-    pub fn new(save_path: &Path) -> Result<Self, String> {
+    /// `proxy` = 代理 URL（`http://` / `socks5://` / `socks4://`，可带 `user:pass@`；None = 直连）；
+    /// `down_kb_s`/`up_kb_s` = 全局下载/上传限速（KiB/s；0 = 不限）。
+    pub fn new(
+        save_path: &Path,
+        proxy: Option<&str>,
+        down_kb_s: u32,
+        up_kb_s: u32,
+    ) -> Result<Self, String> {
         let core = BtCore::new(save_path, "smart-dl-daemon")
             .map_err(|e| format!("bt session init: {}", core_err(&e)))?;
         // 全量 alert mask：状态推进（bt_events）+ 续传凭据（save_resume_data alert）都需要
         let _ = core.set_alert_mask(0xFFFF);
+        // 全局网络策略（代理 + 限速）：启动时一次 apply（代理/限速不参与热重载）
+        let proxy_cfg = match proxy {
+            Some(u) if !u.is_empty() => match smart_dl_btcore::ffi::parse_proxy(u) {
+                Ok(c) => Some(c),
+                Err(e) => return Err(format!("bt proxy 解析失败 {u:?}: {e:?}")),
+            },
+            _ => None,
+        };
+        core.apply_network(proxy_cfg.as_ref(), down_kb_s, up_kb_s)
+            .map_err(|e| format!("bt apply_network: {e:?}"))?;
         Ok(BtEngine {
             core: Arc::new(core),
             save_path: save_path.to_path_buf(),
