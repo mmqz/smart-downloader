@@ -89,6 +89,8 @@ pub struct DaemonState {
     next_id: AtomicU64,
     /// 任务持久化文件（Some 时 add/remove/状态变更后自动落盘）。
     persist_path: Option<PathBuf>,
+    /// HTTP 任务默认落盘目录（dest 未指定时用；serve 从配置 `[download] dest_root` 注入）。
+    default_dest_root: PathBuf,
 }
 
 /// 持久化任务记录：`task`（含 source 原文：url/magnet/torrent 字节）+ 引擎种类。
@@ -120,7 +122,14 @@ impl DaemonState {
             providers,
             next_id: AtomicU64::new(1),
             persist_path: None,
+            default_dest_root: PathBuf::from("."),
         }
+    }
+
+    /// 注入 HTTP 任务默认落盘目录（dest 未指定时使用；serve 从 `[download] dest_root` 传入）。
+    pub fn with_dest_root(mut self, default_dest_root: PathBuf) -> Self {
+        self.default_dest_root = default_dest_root;
+        self
     }
 
     /// 启用任务持久化（每次变更自动写 JSON 到 `path`）。
@@ -437,7 +446,10 @@ impl DaemonState {
             return Err(DaemonError::InvalidSource(url));
         }
         // B10：目标目录预检（创建/可写）；HTTP 大小在响应头才知 → 空间预检跳过
-        let dest_root = ensure_dest_root(dest_root)?;
+        // dest 未指定 → 默认落盘目录（serve 配置 dest_root；未注入时为 daemon cwd）
+        let dest =
+            dest_root.or_else(|| Some(self.default_dest_root.to_string_lossy().into_owned()));
+        let dest_root = ensure_dest_root(dest)?;
         let canonical = CanonicalId {
             kind: CanonicalKind::Http,
             identity: canonical_http_url(&url), // D34：剥 token 参数后的 canonical 身份
@@ -1386,5 +1398,43 @@ mod persist_tests {
         // 无 persist_path → 无写盘（autosave 直接 return）
         // 此测试验证不 panic；写盘路径由 with_storage 测试覆盖。
         assert!(fake.added().len() == 1);
+    }
+
+    #[tokio::test]
+    async fn dest_none_uses_default_dest_root() {
+        // with_dest_root 注入默认目录后，dest 未指定 → 任务落默认目录（而非 daemon cwd）
+        let fake = Arc::new(FakeEngine::new(EngineKind::Http));
+        let state = DaemonState::new(fake.clone(), vec![])
+            .with_dest_root(std::path::PathBuf::from("/data/default-dl"));
+        let tid = state
+            .add_http_task("https://example.com/dest.bin".into(), None)
+            .await
+            .unwrap();
+        let rec = state.tasks.lock().unwrap().get(&tid).cloned().unwrap();
+        assert_eq!(
+            rec.task.dest_root,
+            std::path::PathBuf::from("/data/default-dl"),
+            "dest 未指定应落到默认 dest_root"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_dest_overrides_default() {
+        let fake = Arc::new(FakeEngine::new(EngineKind::Http));
+        let state = DaemonState::new(fake.clone(), vec![])
+            .with_dest_root(std::path::PathBuf::from("/data/default-dl"));
+        let tid = state
+            .add_http_task(
+                "https://example.com/override.bin".into(),
+                Some("/tmp/custom".into()),
+            )
+            .await
+            .unwrap();
+        let rec = state.tasks.lock().unwrap().get(&tid).cloned().unwrap();
+        assert_eq!(
+            rec.task.dest_root,
+            std::path::PathBuf::from("/tmp/custom"),
+            "显式 dest 优先于默认"
+        );
     }
 }

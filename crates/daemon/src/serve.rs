@@ -34,9 +34,11 @@ pub async fn run(cfg: Config) -> Result<(), ServeError> {
     let http_engine: Arc<dyn smart_dl_core::types::DownloadEngine> =
         Arc::new(smart_dl_httpdl::HttpEngine::new(reqwest::Client::new()));
     #[cfg(feature = "bt")]
-    let mut state = DaemonState::new(http_engine, vec![]);
+    let mut state =
+        DaemonState::new(http_engine, vec![]).with_dest_root(cfg.download.dest_root.clone());
     #[cfg(not(feature = "bt"))]
-    let mut state = DaemonState::new(http_engine, vec![]);
+    let mut state =
+        DaemonState::new(http_engine, vec![]).with_dest_root(cfg.download.dest_root.clone());
 
     // 4. BT 引擎（先取 core 句柄，供 alert 事件流）
     #[cfg(feature = "bt")]
