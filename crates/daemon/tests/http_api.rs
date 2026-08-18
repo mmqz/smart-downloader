@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 async fn serve() -> (std::net::SocketAddr, Arc<DaemonState>) {
     let engine = HttpEngine::new(reqwest::Client::new());
-    let state = Arc::new(DaemonState::new(engine, vec![]));
+    let state = Arc::new(DaemonState::new(Arc::new(engine), vec![]));
     let app = http::router(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -185,7 +185,7 @@ async fn unknown_task_returns_404() {
 fn hub_wired_into_state() {
     // DaemonState 持有 WsHub（事件发布统一入口）
     let engine = HttpEngine::new(reqwest::Client::new());
-    let state = DaemonState::new(engine, vec![]);
+    let state = DaemonState::new(Arc::new(engine), vec![]);
     let hub: &WsHub = state.hub();
     assert_eq!(hub.last_seq(), 0);
 }

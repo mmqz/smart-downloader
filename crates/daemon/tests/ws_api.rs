@@ -16,7 +16,7 @@ type Ws = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 async fn serve() -> (std::net::SocketAddr, Arc<DaemonState>) {
     let engine = HttpEngine::new(reqwest::Client::new());
-    let state = Arc::new(DaemonState::new(engine, vec![]));
+    let state = Arc::new(DaemonState::new(Arc::new(engine), vec![]));
     let app = http::router(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

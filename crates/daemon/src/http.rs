@@ -27,12 +27,23 @@ pub struct AddTaskReq {
 pub fn router(state: Arc<DaemonState>) -> Router {
     Router::new()
         .route("/tasks", get(list_tasks).post(add_task))
-        .route("/tasks/:id", get(task_snapshot))
+        .route("/tasks/:id", get(task_snapshot).delete(remove_task))
         .route("/tasks/:id/pause", post(pause_task))
         .route("/tasks/:id/resume", post(resume_task))
         .route("/providers", get(providers))
         .route("/ws", get(ws_handler))
         .with_state(state)
+}
+
+/// 删除任务（引擎 remove + 目录记录移除；delete_data=false 保留已下载文件）。
+async fn remove_task(
+    Path(id): Path<String>,
+    State(state): State<Arc<DaemonState>>,
+) -> impl IntoResponse {
+    match state.remove(&id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
 }
 
 /// WS 升级端点（D36 socket 端点，M7）：连接即推全量（重连重同步），随后

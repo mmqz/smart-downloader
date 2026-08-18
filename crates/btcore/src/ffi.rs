@@ -415,7 +415,7 @@ fn cstr_array(web_seeds: &[String]) -> (Vec<CString>, Vec<*const c_char>) {
 }
 
 /// web_seeds 指针数组的 C 侧可变指针（bindgen: `*mut *const c_char`）
-fn ws_mut(ws: &Vec<*const c_char>) -> *mut *const c_char {
+fn ws_mut(ws: &[*const c_char]) -> *mut *const c_char {
     ws.as_ptr() as *mut *const c_char
 }
 

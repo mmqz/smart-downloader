@@ -1378,12 +1378,14 @@ dependencies = [
 name = "smart-dl-daemon"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "base64",
  "futures",
  "reqwest",
  "serde",
  "serde_json",
+ "smart-dl-btcore",
  "smart-dl-core",
  "smart-dl-httpdl",
  "smart-dl-provider",

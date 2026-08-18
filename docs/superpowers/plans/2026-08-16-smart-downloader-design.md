@@ -261,6 +261,20 @@ ed2k://             → Ed2k（不支持 → InvalidSource）
 - 归一化在 `DaemonState::add_link_task` 消费：`Http(real)` 走既有 canonical 查重 + HttpEngine 流程（D34 剥 token 生效于解码后 URL）。
 - 测试：core normalize 单测 9 + daemon http_api 集成 3（thunder/qqdl 解码 201 + 快照 source 为真实 URL；magnet/ed2k/未知/坏 base64 → 400 明确报错）。
 
+### 7.3 magnet 接入 BT 引擎（feature `bt`，2026-08-18 补充）
+
+- daemon 引擎表 `HashMap<EngineKind, Arc<dyn DownloadEngine>>`（core DownloadEngine trait 统一抽象）；
+  `DaemonState::new(http_engine)` + `with_bt(bt_engine)` 注册双引擎；任务记录带 `engine_kind`，
+  快照/pause/resume/remove 按任务归属路由引擎。
+- `magnet:` → `BtEngine`（`crates/daemon/src/bt.rs`，feature `bt`）包装 `smart-dl-btcore::BtCore`
+  单会话：add_magnet → engine_tid = infohash；状态映射 lt state（0 下载/1 完成/3 错误/4 元数据）
+  → `EngineStatus`；快去重键 = `xt=urn:btih:<40hex>`（`CanonicalKind::Bt`）。
+- feature `bt` 默认关（CI 基线不链接 libtorrent）；启用：`--features daemon/bt`（需本机
+  LT 链接环境，vcpkg_installed bin 在 PATH）。无 feature 时 magnet → InvalidSource（提示编译开关）。
+- 测试：`tests/bt_api.rs` 4 项（feature-gated：magnet add 201 + engine=bt 快照 + btih 去重 409
+  + HTTP/BT 并存 + remove 404）。同时补 `DELETE /tasks/:id` REST 端点。
+- 后置：BT 状态机事件流（Completed/alert 驱动）、torrent 文件导入、seeding 策略。
+
 ---
 
 ## 8. FFI 接口契约（v0.6：含 cxx spike 决策点 + alert 预算）
