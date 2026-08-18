@@ -105,3 +105,39 @@ Offset  Size  Field                   值（实测）
 - 本任务包**不含**任何账号 token/设备标识（equity_token 等均打码）。
 - 目标仍为 peer 加速器（数千行），非 134 消息全套。
 - 加速器核心依赖"响应解密"——**在此之前，任何进一步协议枚举均为低优先级**。
+
+---
+
+## 9. 云端 v3 回执（2026-08-18 晚）——解密路径定案
+
+交付：`phub_peer_accelerator_v3.zip`（PHUB_PROTOCOL_SPEC_V3.md + `phub_capture.js` Frida hook）。
+
+**Q1 答复**（forge 被拒原因）：拒绝发生在 **RSA ekey 解密步**——forge 包缺
+`[4B ekey_size=128][128B RSA ekey]`，服务器解不出 AES key。
+
+**Q2 答复**（13B vs 8B 头）：13B 头来自 `PhubHttpPkgResponser::ParseData @ 0x1801618a0` =
+**非生产路径**（DPHub UDP / 旧版兼容）；生产请求 = **8B 头 + 4B ekey_size + 128B ekey +
+4B aes_size + AES body**（368 精确）。
+
+**v3 修正表**（云端反汇编 `DownloadSDK.dll @ 0x180285de0`，唯一 RSA+AES 同现函数）：
+| v2 断言 | v3 修正（A 级） |
+|---|---|
+| AES key = MD5(seq‖cmd) | ❌ = `XPF_RandomBytes` 生成的 **16B 随机数**（@ 0x180285fbe） |
+| PHub 用 13B 头 | ❌ 8B 头 + RSA ekey + AES body |
+| MD5 forge 可行 | ❌ 需 RSA 私钥（服务器持有） |
+| MD5 离线解密可行 | ❌ 必须运行时捕获随机 AES key |
+| cmd_id = 0x26035888 | ✅ 硬编码 @ 0x180286047，与 368B 样本吻合 |
+
+MD5 派生仅存于 5 个非 PHub 路径（0x18015b090 / 0x180162dc0 / 0x1801672d0 /
+0x180177150 / 0x1802aca80）。
+
+**定案：唯一可执行闭环 = Frida hook**（本地用户侧）：
+1. `XPF_RandomBytes` → 捕获 16B 随机 AES key（生成时）
+2. `XPF_AESCreateDecryptContext` → 同一 key 进入响应解密
+3. `XPF_AESDecryptBufferECB` → (ctx, ct, len, out) 三元组，**明文在 out 里**
+
+`phub_capture.js`（云端交付，已解压至 `cloud_delivery/v3/`）：hook 7 个导出函数、
+懒安装、落盘 `C:\phub_capture\`。**待用户侧运行**：装 frida → 迅雷下载时挂 hook →
+拿 (key, ct, pt) → `decrypt_with_captured_keys.py` 批量解 → peers 明文 → 加速器闭环。
+
+**主项目侧现状**（不阻塞）：magnet 接入 BT 引擎（btcore `add_magnet` 已就绪）推进中。
