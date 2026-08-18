@@ -186,8 +186,12 @@ async fn invalid_base64_rejected() {
 }
 
 #[tokio::test]
-async fn magnet_with_nested_dest_auto_created() {
-    // B10：dest 指向不存在目录 → 自动创建 + 201
+async fn http_task_with_nested_dest_auto_created() {
+    // B10：dest 指向不存在目录 → 自动创建 + 201（HTTP 任务 per-task dest 真实生效；
+    // BT 引擎 v1 全局落盘不接受自定义 dest，见 bt_task_with_custom_dest_rejected）
+    let body = common::patterned(8 * 1024);
+    let srv = TestServer::start(body).await;
+    let url = srv.url();
     let dir = tempfile::tempdir().unwrap();
     let nested = dir.path().join("some/deep/dir");
     let (addr, _state) = serve_bt().await;
@@ -197,7 +201,7 @@ async fn magnet_with_nested_dest_auto_created() {
     let resp = client
         .post(format!("{base}/tasks"))
         .json(&serde_json::json!({
-            "url": MAGNET,
+            "url": url,
             "dest": nested.to_string_lossy()
         }))
         .send()
@@ -281,4 +285,56 @@ async fn magnet_remove_ok() {
         .await
         .unwrap();
     assert_eq!(snap.status(), 404, "删除后快照应 404");
+}
+
+#[tokio::test]
+async fn bt_task_with_custom_dest_rejected() {
+    // BT 引擎 v1 全局落盘（serve bt.save_path）：任务级 dest 与全局目录不一致 → 400
+    let (addr, _state) = serve_bt().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+    let custom = tempfile::tempdir().unwrap();
+
+    let resp = client
+        .post(format!("{base}/tasks"))
+        .json(&serde_json::json!({
+            "url": MAGNET,
+            "dest": custom.path().to_string_lossy()
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::BAD_REQUEST,
+        "自定义 dest 应被拒绝（诚实约束，避免静默落错目录）"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("全局落盘"), "错误信息应说明落盘约束: {body}");
+}
+
+#[tokio::test]
+async fn readd_same_magnet_after_restart_ok() {
+    // 重启续传前提：新 session 同一 save_path 重新 add 同一 magnet → 成功（libtorrent
+    // 磁盘检查复用已下载块）。daemon 持久化恢复走的就是这条路径。
+    let dir = tempfile::tempdir().unwrap();
+    let http = smart_dl_httpdl::HttpEngine::new(reqwest::Client::new());
+
+    // 第一次"运行"
+    let r1 = {
+        let bt = smart_dl_daemon::bt::BtEngine::new(dir.path()).unwrap();
+        let state = DaemonState::new(Arc::new(http.clone()), vec![]).with_bt(Arc::new(bt));
+        state.add_link_task(MAGNET.to_string(), None).await
+    };
+    assert!(r1.is_ok(), "首次 add 应成功: {:?}", r1.err());
+
+    // "重启"：新 session（同 save_path）重新 add
+    let bt2 = smart_dl_daemon::bt::BtEngine::new(dir.path()).unwrap();
+    let state2 = DaemonState::new(Arc::new(http), vec![]).with_bt(Arc::new(bt2));
+    let r2 = state2.add_link_task(MAGNET.to_string(), None).await;
+    assert!(
+        r2.is_ok(),
+        "重启后同 ih 重新 add 应成功（续传前提）: {:?}",
+        r2.err()
+    );
 }

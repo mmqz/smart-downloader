@@ -13,7 +13,8 @@ dest_root = "./downloads"
 [bt]
 # 启用 BT 引擎（需编译 --features bt；无则仅 HTTP）
 enabled = true
-# BT 落盘目录（缺省 = download.dest_root；须存在，启动时自动创建）
+# BT 全局落盘目录（v1 单 session：所有 BT 任务落此目录；任务级 dest 仅接受默认
+# 或与之一致——自定义 dest 会被拒绝）。缺省 = download.dest_root；启动时自动创建。
 # save_path = "./downloads/bt"
 
 [lock]

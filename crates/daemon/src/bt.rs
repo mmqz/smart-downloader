@@ -12,7 +12,7 @@ use smart_dl_core::types::{
     EngineTaskId, FileProgress, PeerInfo,
 };
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const LT_STATE_COMPLETED: i32 = 1;
@@ -54,16 +54,23 @@ fn map_status(st: &TorrentStatus) -> EngineStatus {
 }
 
 /// libtorrent 薄核引擎（单 session）。
+/// **落盘语义（v1）**：单 session 全局落盘目录（`BtEngine::new` 的 save_path，serve 配置
+/// `[bt] save_path`）。`DownloadTask.dest_root` 仅接受与全局目录一致或默认 `"."`——
+/// 显式指定其他目录会返回错误（避免"用户指定 A 目录、实际落 B 目录"的静默错位）。
+/// **恢复续传**：重启后同一 save_path 重新 add 同一 magnet/torrent → libtorrent 磁盘检查复用
+/// 已下载块（无需 fastresume；resume 数据未接，checking 全盘但功能正确）。
 pub struct BtEngine {
     core: Arc<BtCore>,
+    save_path: PathBuf,
 }
 
 impl BtEngine {
-    /// 新建 BT 会话（save_path 为落盘目录，须已存在）。
+    /// 新建 BT 会话（save_path 为全局落盘目录，须已存在）。
     pub fn new(save_path: &Path) -> Result<Self, String> {
         BtCore::new(save_path, "smart-dl-daemon")
             .map(|core| BtEngine {
                 core: Arc::new(core),
+                save_path: save_path.to_path_buf(),
             })
             .map_err(|e| format!("bt session init: {}", core_err(&e)))
     }
@@ -100,6 +107,13 @@ impl DownloadEngine for BtEngine {
     }
 
     async fn add(&self, task: &DownloadTask) -> Result<EngineTaskId, EngineError> {
+        // v1 落盘约束：任务级 dest 仅接受默认 "." 或与全局 save_path 一致
+        if task.dest_root != Path::new(".") && task.dest_root != self.save_path {
+            return Err(EngineError::Other(format!(
+                "BT 引擎 v1 全局落盘于 {:?}，任务 dest {:#?} 不支持（请用全局目录或默认）",
+                self.save_path, task.dest_root
+            )));
+        }
         let web_seeds: Vec<String> = vec![];
         let ih = match &task.source {
             DownloadSource::Magnet(m) => self.core.add_magnet(m, &web_seeds),
