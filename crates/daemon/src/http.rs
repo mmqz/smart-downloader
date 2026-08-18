@@ -35,9 +35,44 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/tasks/:id", get(task_snapshot).delete(remove_task))
         .route("/tasks/:id/pause", post(pause_task))
         .route("/tasks/:id/resume", post(resume_task))
+        .route("/tasks/:id/logs", get(task_logs))
+        .route("/tasks/:id/fallback", post(task_fallback))
+        .route("/config", get(config_endpoint))
         .route("/providers", get(providers))
         .route("/ws", get(ws_handler))
         .with_state(state)
+}
+
+/// `GET /tasks/:id/logs`：任务操作日志（快照 + 事件序列）。
+async fn task_logs(
+    State(state): State<Arc<DaemonState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.task_logs(&id) {
+        Ok(v) => Json(v).into_response(),
+        Err(_) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "not found" })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /tasks/:id/fallback`：Q-B9 手动兜底——v1 未接入引擎侧兜底，明确 501。
+async fn task_fallback(
+    State(_state): State<Arc<DaemonState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({ "error": format!("Q-B9 fallback 未实现（v1 无引擎侧兜底）: {id}") })),
+    )
+        .into_response()
+}
+
+/// `GET /config`：生效配置快照（serve 注入；未注入时提示）。
+async fn config_endpoint(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
+    Json(state.config_snapshot())
 }
 
 /// 删除任务（引擎 remove + 目录记录移除；delete_data=false 保留已下载文件）。

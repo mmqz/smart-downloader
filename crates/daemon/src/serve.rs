@@ -71,6 +71,14 @@ pub async fn run(cfg: Config) -> Result<(), ServeError> {
         }
     }
     state = state.with_storage(tasks_path.clone());
+    // 4b+. 注入生效配置快照（GET /config 返回；精简字段，不含敏感项）
+    state = state.with_config(serde_json::json!({
+        "dest_root": cfg.download.dest_root,
+        "bt_save_path": cfg.bt_save_path(),
+        "bt_enabled": cfg.bt.enabled,
+        "listen_addr": cfg.server.addr,
+        "persist_path": tasks_path,
+    }));
     if tasks_path.exists() {
         match state.restore_from(&tasks_path).await {
             Ok(n) => tracing::info!("已从 {tasks_path:?} 恢复 {n} 个任务"),

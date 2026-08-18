@@ -210,8 +210,7 @@ async fn cli_json_output_success() {
     // 空列表 --json 输出
     client.run(&CliCommand::List, true).await.unwrap();
 
-    // 未实现命令 → 明确提示
-    let cfg = client.run(&CliCommand::Config, false).await;
-    assert!(cfg.is_err());
-    assert!(cfg.unwrap_err().to_string().contains("无对应端点"));
+    // D37 端点补齐：config 命令 → GET /config（v1 有端点，成功返回配置快照）
+    client.run(&CliCommand::Config, false).await.unwrap();
+    client.run(&CliCommand::Config, true).await.unwrap();
 }

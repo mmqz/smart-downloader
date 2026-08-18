@@ -25,6 +25,35 @@ pub struct TaskRecord {
     pub engine_tid: Option<EngineTaskId>,
     pub engine_kind: EngineKind,
     pub engine_status: Option<EngineStatus>,
+    /// 运行态操作日志（add/pause/resume/remove/restored；引擎状态变更不记——见快照）。
+    events: Vec<TaskEvent>,
+}
+
+/// 任务操作日志条目（`GET /tasks/:id/logs` 返回）。
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct TaskEvent {
+    /// Unix 毫秒时间戳。
+    pub at_ms: u64,
+    /// 操作名：add / pause / resume / remove / restored。
+    pub op: String,
+    pub detail: Option<String>,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+impl TaskRecord {
+    fn push_event(&mut self, op: &str, detail: Option<String>) {
+        self.events.push(TaskEvent {
+            at_ms: now_ms(),
+            op: op.to_string(),
+            detail,
+        });
+    }
 }
 
 /// 任务快照（GET /tasks/:id，跳号补拉入口）。
@@ -91,6 +120,8 @@ pub struct DaemonState {
     persist_path: Option<PathBuf>,
     /// HTTP 任务默认落盘目录（dest 未指定时用；serve 从配置 `[download] dest_root` 注入）。
     default_dest_root: PathBuf,
+    /// 生效配置快照（`GET /config` 返回；serve 注入精简字段）。
+    config_snapshot: Option<serde_json::Value>,
 }
 
 /// 持久化任务记录：`task`（含 source 原文：url/magnet/torrent 字节）+ 引擎种类。
@@ -123,12 +154,19 @@ impl DaemonState {
             next_id: AtomicU64::new(1),
             persist_path: None,
             default_dest_root: PathBuf::from("."),
+            config_snapshot: None,
         }
     }
 
     /// 注入 HTTP 任务默认落盘目录（dest 未指定时使用；serve 从 `[download] dest_root` 传入）。
     pub fn with_dest_root(mut self, default_dest_root: PathBuf) -> Self {
         self.default_dest_root = default_dest_root;
+        self
+    }
+
+    /// 注入生效配置快照（`GET /config` 返回；serve 组装精简字段）。
+    pub fn with_config(mut self, snapshot: serde_json::Value) -> Self {
+        self.config_snapshot = Some(snapshot);
         self
     }
 
@@ -191,24 +229,28 @@ impl DaemonState {
             };
             match engine.add(&t).await {
                 Ok(tid) => {
-                    let rec = TaskRecord {
+                    let mut rec = TaskRecord {
                         task: t,
                         engine_tid: Some(tid),
                         engine_kind: pt.engine_kind,
                         engine_status: None,
+                        events: vec![],
                     };
+                    rec.push_event("restored", None);
                     self.tasks.lock().unwrap().insert(rec.task.id.clone(), rec);
                     restored += 1;
                 }
                 Err(e) => {
                     tracing::warn!("恢复任务 {} 引擎 add 失败（标 Failed）: {e}", t.id);
                     t.state = TaskState::Failed;
-                    let rec = TaskRecord {
+                    let mut rec = TaskRecord {
                         task: t,
                         engine_tid: None,
                         engine_kind: pt.engine_kind,
                         engine_status: None,
+                        events: vec![],
                     };
+                    rec.push_event("restored", Some(format!("引擎 add 失败: {e}")));
                     self.tasks.lock().unwrap().insert(rec.task.id.clone(), rec);
                     failed += 1;
                 }
@@ -326,15 +368,15 @@ impl DaemonState {
             .add(&task)
             .await
             .map_err(|e| DaemonError::Engine(e.to_string()))?;
-        self.tasks.lock().unwrap().insert(
-            task_id.clone(),
-            TaskRecord {
-                task,
-                engine_tid: Some(engine_tid),
-                engine_kind: EngineKind::Bt,
-                engine_status: None,
-            },
-        );
+        let mut rec = TaskRecord {
+            task,
+            engine_tid: Some(engine_tid),
+            engine_kind: EngineKind::Bt,
+            engine_status: None,
+            events: vec![],
+        };
+        rec.push_event("add", None);
+        self.tasks.lock().unwrap().insert(task_id.clone(), rec);
         self.autosave();
         self.hub.publish(SchedulerEvent::TaskCreated {
             task_id: task_id.clone(),
@@ -415,15 +457,15 @@ impl DaemonState {
             .add(&task)
             .await
             .map_err(|e| DaemonError::Engine(e.to_string()))?;
-        self.tasks.lock().unwrap().insert(
-            task_id.clone(),
-            TaskRecord {
-                task,
-                engine_tid: Some(engine_tid),
-                engine_kind: EngineKind::Bt,
-                engine_status: None,
-            },
-        );
+        let mut rec = TaskRecord {
+            task,
+            engine_tid: Some(engine_tid),
+            engine_kind: EngineKind::Bt,
+            engine_status: None,
+            events: vec![],
+        };
+        rec.push_event("add", None);
+        self.tasks.lock().unwrap().insert(task_id.clone(), rec);
         self.autosave();
         self.hub.publish(SchedulerEvent::TaskCreated {
             task_id: task_id.clone(),
@@ -503,15 +545,15 @@ impl DaemonState {
             .add(&task)
             .await
             .map_err(|e| DaemonError::Engine(e.to_string()))?;
-        self.tasks.lock().unwrap().insert(
-            task_id.clone(),
-            TaskRecord {
-                task,
-                engine_tid: Some(engine_tid),
-                engine_kind: EngineKind::Http,
-                engine_status: None,
-            },
-        );
+        let mut rec = TaskRecord {
+            task,
+            engine_tid: Some(engine_tid),
+            engine_kind: EngineKind::Http,
+            engine_status: None,
+            events: vec![],
+        };
+        rec.push_event("add", None);
+        self.tasks.lock().unwrap().insert(task_id.clone(), rec);
         self.autosave();
         self.hub.publish(SchedulerEvent::TaskCreated {
             task_id: task_id.clone(),
@@ -580,6 +622,9 @@ impl DaemonState {
             .pause(&tid)
             .await
             .map_err(|e| DaemonError::Engine(e.to_string()))?;
+        if let Some(rec) = self.tasks.lock().unwrap().get_mut(id) {
+            rec.push_event("pause", None);
+        }
         self.hub.publish(SchedulerEvent::StateChanged {
             task_id: id.to_string(),
             from: TaskState::Downloading(rec.engine_kind),
@@ -604,6 +649,9 @@ impl DaemonState {
             .resume(&tid)
             .await
             .map_err(|e| DaemonError::Engine(e.to_string()))?;
+        if let Some(rec) = self.tasks.lock().unwrap().get_mut(id) {
+            rec.push_event("resume", None);
+        }
         self.hub.publish(SchedulerEvent::StateChanged {
             task_id: id.to_string(),
             from: TaskState::Paused,
@@ -634,6 +682,28 @@ impl DaemonState {
             .iter()
             .map(|p| (p.name().to_string(), p.runtime()))
             .collect()
+    }
+
+    /// 任务操作日志（`GET /tasks/:id/logs`）：快照 + 事件序列。
+    pub fn task_logs(&self, id: &str) -> Result<serde_json::Value, DaemonError> {
+        let tasks = self.tasks.lock().unwrap();
+        let rec = tasks
+            .get(id)
+            .ok_or_else(|| DaemonError::NotFound(id.to_string()))?;
+        Ok(serde_json::json!({
+            "task_id": rec.task.id,
+            "state": state_label(&rec.task.state),
+            "source": format!("{:?}", rec.task.source),
+            "error": rec.engine_status.as_ref().and_then(|s| s.error.clone()),
+            "events": rec.events,
+        }))
+    }
+
+    /// 生效配置快照（`GET /config` 返回；未注入时给出提示对象）。
+    pub fn config_snapshot(&self) -> serde_json::Value {
+        self.config_snapshot
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({ "note": "配置快照未注入（serve 组装）" }))
     }
 }
 
@@ -958,6 +1028,7 @@ mod bt_alert_tests {
             engine_tid: Some(ih.to_string()),
             engine_kind: EngineKind::Bt,
             engine_status: None,
+            events: vec![],
         }
     }
 

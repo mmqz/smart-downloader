@@ -52,15 +52,35 @@ impl CliClient {
             CliCommand::List => self.list(json).await,
             CliCommand::Status { task_id } => self.status(task_id, json).await,
             CliCommand::Logs { task_id } => {
-                // v1 无 logs 端点：退化为状态快照（含 engine_status）
-                self.status(task_id, json).await
+                let resp = self
+                    .client
+                    .get(format!("{}/tasks/{}/logs", self.base, task_id))
+                    .send()
+                    .await
+                    .map_err(|e| CliError::Http(e.to_string()))?;
+                self.check(resp, json).await?;
+                Ok(())
             }
-            CliCommand::Config => Err(CliError::Http(
-                "config 命令 v1 无对应端点（serve 配置见 config.toml）".into(),
-            )),
-            CliCommand::Fallback { task_id } => Err(CliError::Http(format!(
-                "fallback 命令 v1 无对应端点（Q-B9 兜底未接入 API）: {task_id}"
-            ))),
+            CliCommand::Config => {
+                let resp = self
+                    .client
+                    .get(format!("{}/config", self.base))
+                    .send()
+                    .await
+                    .map_err(|e| CliError::Http(e.to_string()))?;
+                self.check(resp, json).await?;
+                Ok(())
+            }
+            CliCommand::Fallback { task_id } => {
+                let resp = self
+                    .client
+                    .post(format!("{}/tasks/{}/fallback", self.base, task_id))
+                    .send()
+                    .await
+                    .map_err(|e| CliError::Http(e.to_string()))?;
+                self.check(resp, json).await?;
+                Ok(())
+            }
         }
     }
 

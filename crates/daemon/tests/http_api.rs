@@ -310,3 +310,84 @@ async fn magnet_ed2k_unknown_rejected_with_clear_error() {
     assert_eq!(s, reqwest::StatusCode::BAD_REQUEST);
     assert!(b["error"].as_str().unwrap().contains("thunder"), "{b}");
 }
+
+// ---- D37 端点补齐：/config、/tasks/:id/logs、/tasks/:id/fallback ----
+
+#[tokio::test]
+async fn config_endpoint_returns_injected_snapshot() {
+    // with_config 注入 → GET /config 返回精简快照
+    let engine = HttpEngine::new(reqwest::Client::new());
+    let state = Arc::new(
+        DaemonState::new(Arc::new(engine), vec![])
+            .with_config(serde_json::json!({ "dest_root": "/data/dl", "note": "test" })),
+    );
+    let app = http::router(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let base = format!("http://{addr}");
+    let resp: serde_json::Value = reqwest::Client::new()
+        .get(format!("{base}/config"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(resp["dest_root"], "/data/dl", "config 应含注入的 dest_root");
+    assert_eq!(resp["note"], "test");
+}
+
+#[tokio::test]
+async fn task_logs_returns_add_event() {
+    // add 任务 → GET /tasks/:id/logs → events 含 add 操作
+    let body = patterned(8 * 1024);
+    let srv = TestServer::start(body).await;
+    let (addr, _state) = serve().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let resp = add_task(&client, &base, &srv.url()).await;
+    assert_eq!(resp.0, reqwest::StatusCode::CREATED);
+    let tid = resp.1["task_id"].as_str().unwrap().to_string();
+
+    let logs: serde_json::Value = client
+        .get(format!("{base}/tasks/{tid}/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(logs["task_id"], tid);
+    assert_eq!(logs["state"], "Queued");
+    let events = logs["events"].as_array().unwrap();
+    assert!(
+        events.iter().any(|e| e["op"] == "add"),
+        "logs 必须含 add 事件: {logs}"
+    );
+}
+
+#[tokio::test]
+async fn fallback_returns_501_not_implemented() {
+    // Q-B9 兜底未接入引擎 → 服务端权威 501（错误来自 daemon 而非 CLI 硬编码）
+    let (addr, _state) = serve().await;
+    let base = format!("http://{addr}");
+    let resp = reqwest::Client::new()
+        .post(format!("{base}/tasks/t1/fallback"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::NOT_IMPLEMENTED,
+        "fallback v1 未实现必须 501"
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        body["error"].as_str().unwrap().contains("fallback"),
+        "错误信息应含 fallback: {body}"
+    );
+}
