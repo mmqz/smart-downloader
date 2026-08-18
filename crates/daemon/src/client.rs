@@ -190,11 +190,13 @@ impl CliClient {
     /// 非 2xx → 提取 {error} 转 Err；json 模式打印响应体；否则静默（动作输出由调用方打印）。
     async fn check(&self, resp: reqwest::Response, json: bool) -> Result<(), CliError> {
         let resp = ensure_ok(resp).await?;
-        if json {
-            let text = resp
-                .text()
-                .await
-                .map_err(|e| CliError::Http(e.to_string()))?;
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| CliError::Http(e.to_string()))?;
+        // json 模式原样输出；人读模式 body 非空也打印（config/logs 的可读结果——
+        // 冒烟发现：此前仅 json 有输出，非 json 静默成功）
+        if !text.is_empty() {
             println!("{text}");
         }
         Ok(())
