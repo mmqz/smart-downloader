@@ -6,10 +6,12 @@ pub mod bt;
 #[cfg(feature = "bt")]
 pub mod bt_events;
 pub mod cli;
+pub mod config;
 pub mod events;
 pub mod health;
 pub mod http;
 pub mod lockfile;
+pub mod serve;
 pub mod state;
 pub mod ws;
 

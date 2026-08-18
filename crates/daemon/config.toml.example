@@ -1,0 +1,21 @@
+# smart-dl-daemon serve 配置示例（TOML）
+# 启动: smart-dl-daemon serve --config config.toml
+# 所有字段可选，缺省用默认值（见 crates/daemon/src/config.rs）。
+
+[server]
+# HTTP/WS 监听地址
+addr = "127.0.0.1:8787"
+
+[download]
+# 默认下载落盘根目录（add 接口未指定 dest 时使用；缺失自动创建）
+dest_root = "./downloads"
+
+[bt]
+# 启用 BT 引擎（需编译 --features bt；无则仅 HTTP）
+enabled = true
+# BT 落盘目录（缺省 = download.dest_root；须存在，启动时自动创建）
+# save_path = "./downloads/bt"
+
+[lock]
+# 单实例锁文件（重复启动 → 直接退出）
+path = "./daemon.lock"
