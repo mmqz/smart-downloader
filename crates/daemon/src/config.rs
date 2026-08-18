@@ -11,6 +11,7 @@ pub struct Config {
     pub download: DownloadCfg,
     pub bt: BtCfg,
     pub lock: LockCfg,
+    pub storage: StorageCfg,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -43,6 +44,13 @@ pub struct LockCfg {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct StorageCfg {
+    /// 任务持久化文件（add/remove/状态变更自动落盘；启动时恢复）。
+    pub tasks_path: PathBuf,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -58,6 +66,9 @@ impl Default for Config {
             },
             lock: LockCfg {
                 path: PathBuf::from("./daemon.lock"),
+            },
+            storage: StorageCfg {
+                tasks_path: PathBuf::from("./tasks.json"),
             },
         }
     }

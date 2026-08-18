@@ -36,38 +36,57 @@ pub async fn run(cfg: Config) -> Result<(), ServeError> {
     #[cfg(feature = "bt")]
     let mut state = DaemonState::new(http_engine, vec![]);
     #[cfg(not(feature = "bt"))]
-    let state = DaemonState::new(http_engine, vec![]);
+    let mut state = DaemonState::new(http_engine, vec![]);
 
-    // 4. BT 引擎 + alert 事件流
+    // 4. BT 引擎（先取 core 句柄，供 alert 事件流）
     #[cfg(feature = "bt")]
-    let (alert_handle, state_arc) = {
+    let bt_core = {
         if cfg.bt.enabled {
             let save = cfg.bt_save_path();
             std::fs::create_dir_all(&save)
                 .map_err(|e| ServeError::Engine(format!("BT 落盘目录创建失败 {save:?}: {e}")))?;
             let bt = crate::bt::BtEngine::new(&save).map_err(ServeError::Engine)?;
-            let core = bt.core(); // Arc<BtCore>：alert 轮询句柄
+            let core = bt.core(); // Arc<BtCore>：alert 轮询句柄（trait 化前保存）
             let bt_arc: Arc<dyn smart_dl_core::types::DownloadEngine> = Arc::new(bt);
             state = state.with_bt(bt_arc);
             tracing::info!("BT 引擎已启用, 落盘: {save:?}");
-            let state_arc = Arc::new(state);
-            let handle = crate::bt_events::spawn_alert_loop(
-                state_arc.clone(),
-                core,
-                Duration::from_millis(500),
-            );
-            (Some(handle), state_arc)
+            Some(core)
         } else {
-            (None, Arc::new(state))
+            None
         }
     };
     #[cfg(not(feature = "bt"))]
-    let state_arc = {
-        if cfg.bt.enabled {
-            tracing::warn!("配置启用了 bt 但编译未带 --features bt，BT 不可用");
+    if cfg.bt.enabled {
+        tracing::warn!("配置启用了 bt 但编译未带 --features bt，BT 不可用");
+    }
+
+    // 4b. 任务持久化 + 启动恢复（须在引擎表就绪后：恢复会重新 add）
+    let tasks_path = cfg.storage.tasks_path.clone();
+    if let Some(parent) = tasks_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| ServeError::Engine(format!("任务目录创建失败 {parent:?}: {e}")))?;
         }
-        Arc::new(state)
+    }
+    state = state.with_storage(tasks_path.clone());
+    if tasks_path.exists() {
+        match state.restore_from(&tasks_path).await {
+            Ok(n) => tracing::info!("已从 {tasks_path:?} 恢复 {n} 个任务"),
+            Err(e) => tracing::warn!("任务恢复失败（继续空启动）: {e}"),
+        }
+    }
+
+    // 4c. BT alert 事件流（feature bt 且 BT 启用时）
+    #[cfg(feature = "bt")]
+    let (alert_handle, state_arc) = {
+        let state_arc = Arc::new(state);
+        let handle = bt_core.map(|core| {
+            crate::bt_events::spawn_alert_loop(state_arc.clone(), core, Duration::from_millis(500))
+        });
+        (handle, state_arc)
     };
+    #[cfg(not(feature = "bt"))]
+    let state_arc = Arc::new(state);
 
     // 5. 路由 + 监听
     let app = http::router(state_arc);

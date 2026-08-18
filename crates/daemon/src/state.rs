@@ -68,6 +68,8 @@ pub enum DaemonError {
     Engine(String),
     #[error("invalid source: {0}")]
     InvalidSource(String),
+    #[error("持久化: {0}")]
+    Persist(String),
 }
 
 /// 守护进程状态：任务 + 引擎表 + 事件中枢。
@@ -77,6 +79,25 @@ pub struct DaemonState {
     tasks: Mutex<HashMap<TaskId, TaskRecord>>,
     providers: Vec<Arc<dyn RemoteProvider>>,
     next_id: AtomicU64,
+    /// 任务持久化文件（Some 时 add/remove/状态变更后自动落盘）。
+    persist_path: Option<PathBuf>,
+}
+
+/// 持久化任务记录：`task`（含 source 原文：url/magnet/torrent 字节）+ 引擎种类。
+/// 运行态字段（engine_tid/engine_status）不落盘——恢复时重新向引擎 add。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PersistedTask {
+    pub task: DownloadTask,
+    pub engine_kind: EngineKind,
+}
+
+/// 原子写任务文件（tmp + rename，防半写）。
+pub fn write_tasks_atomic(path: &Path, tasks: &[PersistedTask]) -> std::io::Result<()> {
+    let json = serde_json::to_vec_pretty(tasks).map_err(std::io::Error::other)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, &json)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 impl DaemonState {
@@ -90,7 +111,14 @@ impl DaemonState {
             tasks: Mutex::new(HashMap::new()),
             providers,
             next_id: AtomicU64::new(1),
+            persist_path: None,
         }
+    }
+
+    /// 启用任务持久化（每次变更自动写 JSON 到 `path`）。
+    pub fn with_storage(mut self, path: PathBuf) -> Self {
+        self.persist_path = Some(path);
+        self
     }
 
     /// 追加 BT 引擎（feature `bt`；无该引擎时 magnet 路由 → InvalidSource）。
@@ -98,6 +126,89 @@ impl DaemonState {
     pub fn with_bt(mut self, bt: Arc<dyn DownloadEngine>) -> Self {
         self.engines.insert(EngineKind::Bt, bt);
         self
+    }
+
+    /// 序列化当前任务目录（持久化用）。
+    fn persisted_tasks(&self) -> Vec<PersistedTask> {
+        self.tasks
+            .lock()
+            .unwrap()
+            .values()
+            .map(|r| PersistedTask {
+                task: r.task.clone(),
+                engine_kind: r.engine_kind,
+            })
+            .collect()
+    }
+
+    /// 自动落盘（启用 storage 时）。同步原子写：任务变更低频（add/remove/状态迁移），
+    /// 必须保证顺序（异步并发写会竞态覆盖旧快照）；JSON 规模小，阻塞代价可忽略。
+    fn autosave(&self) {
+        let Some(path) = self.persist_path.clone() else {
+            return;
+        };
+        let data = self.persisted_tasks();
+        if let Err(e) = write_tasks_atomic(&path, &data) {
+            tracing::warn!("任务持久化失败 {path:?}: {e}");
+        }
+    }
+
+    /// 从持久化文件恢复任务：逐条重新 add 到引擎（保留原 task_id，
+    /// next_id 推进），add 失败的任务标 Failed 保留记录。返回恢复条数。
+    pub async fn restore_from(&self, path: &Path) -> Result<usize, DaemonError> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| DaemonError::Persist(format!("读取 {path:?} 失败: {e}")))?;
+        let pts: Vec<PersistedTask> = serde_json::from_str(&text)
+            .map_err(|e| DaemonError::Persist(format!("解析 {path:?} 失败: {e}")))?;
+        let mut restored = 0usize;
+        let mut failed = 0usize;
+        for pt in pts {
+            let mut t = pt.task.clone();
+            t.state = TaskState::Queued; // 重启后重新入队
+            let engine = match self.engine_for(pt.engine_kind) {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!("恢复任务 {} 引擎不可用: {e}", t.id);
+                    continue;
+                }
+            };
+            match engine.add(&t).await {
+                Ok(tid) => {
+                    let rec = TaskRecord {
+                        task: t,
+                        engine_tid: Some(tid),
+                        engine_kind: pt.engine_kind,
+                        engine_status: None,
+                    };
+                    self.tasks.lock().unwrap().insert(rec.task.id.clone(), rec);
+                    restored += 1;
+                }
+                Err(e) => {
+                    tracing::warn!("恢复任务 {} 引擎 add 失败（标 Failed）: {e}", t.id);
+                    t.state = TaskState::Failed;
+                    let rec = TaskRecord {
+                        task: t,
+                        engine_tid: None,
+                        engine_kind: pt.engine_kind,
+                        engine_status: None,
+                    };
+                    self.tasks.lock().unwrap().insert(rec.task.id.clone(), rec);
+                    failed += 1;
+                }
+            }
+        }
+        // next_id 推进到已用最大值之后（保留原 task_id 的关键）
+        let max_id = self
+            .tasks
+            .lock()
+            .unwrap()
+            .keys()
+            .filter_map(|k| k.strip_prefix('t').and_then(|s| s.parse::<u64>().ok()))
+            .max()
+            .unwrap_or(0);
+        self.next_id.fetch_max(max_id + 1, Ordering::SeqCst);
+        tracing::info!("任务恢复完成: {restored} 恢复, {failed} 失败（引擎 add 错误）");
+        Ok(restored)
     }
 
     fn engine_for(&self, kind: EngineKind) -> Result<Arc<dyn DownloadEngine>, DaemonError> {
@@ -207,6 +318,7 @@ impl DaemonState {
                 engine_status: None,
             },
         );
+        self.autosave();
         self.hub.publish(SchedulerEvent::TaskCreated {
             task_id: task_id.clone(),
         });
@@ -295,6 +407,7 @@ impl DaemonState {
                 engine_status: None,
             },
         );
+        self.autosave();
         self.hub.publish(SchedulerEvent::TaskCreated {
             task_id: task_id.clone(),
         });
@@ -379,6 +492,7 @@ impl DaemonState {
                 engine_status: None,
             },
         );
+        self.autosave();
         self.hub.publish(SchedulerEvent::TaskCreated {
             task_id: task_id.clone(),
         });
@@ -490,6 +604,7 @@ impl DaemonState {
                 let _ = engine.remove(&tid, false).await;
             }
         }
+        self.autosave();
         Ok(())
     }
 
@@ -562,6 +677,7 @@ impl DaemonState {
                     es.error = Some(a.msg.clone());
                 }
             }
+            self.autosave(); // 状态迁移落盘
             return Some(BtAlertEffect {
                 task_id: id.clone(),
                 from,
@@ -1036,5 +1152,231 @@ mod b10_tests {
     fn check_space_zero_total_ok() {
         let dir = tempfile::tempdir().unwrap();
         assert!(precheck_space(dir.path(), 0).is_ok());
+    }
+}
+
+/// 假引擎（持久化恢复测试用）：add 记录输入、可对指定 url 返回错误。
+#[cfg(test)]
+pub struct FakeEngine {
+    kind: EngineKind,
+    counter: std::sync::atomic::AtomicU64,
+    fail_urls: std::sync::Mutex<std::collections::HashSet<String>>,
+    added: std::sync::Mutex<Vec<String>>,
+}
+
+#[cfg(test)]
+impl FakeEngine {
+    pub fn new(kind: EngineKind) -> Self {
+        FakeEngine {
+            kind,
+            counter: std::sync::atomic::AtomicU64::new(1),
+            fail_urls: std::sync::Mutex::new(std::collections::HashSet::new()),
+            added: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn fail_url(&self, url: &str) {
+        self.fail_urls.lock().unwrap().insert(url.to_string());
+    }
+
+    pub fn added(&self) -> Vec<String> {
+        self.added.lock().unwrap().clone()
+    }
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl DownloadEngine for FakeEngine {
+    fn id(&self) -> &str {
+        "fake"
+    }
+
+    fn kind(&self) -> EngineKind {
+        self.kind
+    }
+
+    fn capabilities(&self) -> Vec<smart_dl_core::types::Capability> {
+        vec![]
+    }
+
+    async fn add(
+        &self,
+        task: &DownloadTask,
+    ) -> Result<EngineTaskId, smart_dl_core::types::EngineError> {
+        let ident = match &task.source {
+            DownloadSource::Http { url, .. } => url.clone(),
+            DownloadSource::Magnet(m) => m.clone(),
+            DownloadSource::TorrentFile(_) => format!("torrent:{}", task.id),
+            _ => task.id.clone(),
+        };
+        if self.fail_urls.lock().unwrap().contains(&ident) {
+            return Err(smart_dl_core::types::EngineError::Other("fake fail".into()));
+        }
+        self.added.lock().unwrap().push(ident);
+        Ok(format!(
+            "fk{}",
+            self.counter
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        ))
+    }
+
+    async fn pause(&self, _id: &EngineTaskId) -> Result<(), smart_dl_core::types::EngineError> {
+        Ok(())
+    }
+    async fn resume(&self, _id: &EngineTaskId) -> Result<(), smart_dl_core::types::EngineError> {
+        Ok(())
+    }
+    async fn status(
+        &self,
+        _id: &EngineTaskId,
+    ) -> Result<EngineStatus, smart_dl_core::types::EngineError> {
+        Ok(EngineStatus::default())
+    }
+    async fn remove(
+        &self,
+        _id: &EngineTaskId,
+        _delete_data: bool,
+    ) -> Result<(), smart_dl_core::types::EngineError> {
+        Ok(())
+    }
+    async fn peers(
+        &self,
+        _id: &EngineTaskId,
+    ) -> Result<Vec<smart_dl_core::types::PeerInfo>, smart_dl_core::types::EngineError> {
+        Ok(vec![])
+    }
+    async fn update_sources(
+        &self,
+        _id: &EngineTaskId,
+        _urls: Vec<String>,
+    ) -> Result<(), smart_dl_core::types::EngineError> {
+        Ok(())
+    }
+    async fn add_url_seed(
+        &self,
+        _id: &EngineTaskId,
+        _url: &str,
+    ) -> Result<(), smart_dl_core::types::EngineError> {
+        Ok(())
+    }
+    async fn ban_peer(
+        &self,
+        _id: &EngineTaskId,
+        _peer: std::net::SocketAddr,
+    ) -> Result<(), smart_dl_core::types::EngineError> {
+        Ok(())
+    }
+    async fn read_piece(
+        &self,
+        _id: &EngineTaskId,
+        _idx: u32,
+    ) -> Result<Vec<u8>, smart_dl_core::types::EngineError> {
+        Ok(vec![])
+    }
+}
+
+/// 任务持久化往返测试（FakeEngine，不联网）。
+#[cfg(test)]
+mod persist_tests {
+    use super::*;
+
+    fn wait_file(path: &std::path::Path, timeout_ms: u64) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        while std::time::Instant::now() < deadline {
+            if path.exists() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("等待持久化文件超时: {path:?}");
+    }
+
+    #[tokio::test]
+    async fn persist_then_restore_keeps_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("tasks.json");
+        let fake = Arc::new(FakeEngine::new(EngineKind::Http));
+        let state = Arc::new(DaemonState::new(fake.clone(), vec![]).with_storage(store.clone()));
+        let tid = state
+            .add_http_task("https://example.com/file.bin".into(), None)
+            .await
+            .unwrap();
+        wait_file(&store, 2000);
+
+        // 新 state（新引擎）恢复
+        let fake2 = Arc::new(FakeEngine::new(EngineKind::Http));
+        let state2 = DaemonState::new(fake2.clone(), vec![]);
+        let n = state2.restore_from(&store).await.unwrap();
+        assert_eq!(n, 1, "应恢复 1 条任务");
+        let rec = state2.tasks.lock().unwrap().get(&tid).cloned().unwrap();
+        assert_eq!(rec.task.id, tid, "task_id 必须保留");
+        assert_eq!(rec.engine_kind, EngineKind::Http);
+        assert_eq!(rec.task.state, TaskState::Queued, "恢复后重新入队");
+        // 引擎重新 add 被调用
+        assert_eq!(
+            fake2.added(),
+            vec!["https://example.com/file.bin".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn next_id_advances_after_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("tasks.json");
+        let fake = Arc::new(FakeEngine::new(EngineKind::Http));
+        let state = Arc::new(DaemonState::new(fake.clone(), vec![]).with_storage(store.clone()));
+        let _ = state
+            .add_http_task("https://example.com/a.bin".into(), None)
+            .await
+            .unwrap();
+        let _ = state
+            .add_http_task("https://example.com/b.bin".into(), None)
+            .await
+            .unwrap();
+        wait_file(&store, 2000);
+
+        let state2 = DaemonState::new(Arc::new(FakeEngine::new(EngineKind::Http)), vec![]);
+        state2.restore_from(&store).await.unwrap();
+        let new_tid = state2
+            .add_http_task("https://example.com/c.bin".into(), None)
+            .await
+            .unwrap();
+        let num: u64 = new_tid.strip_prefix('t').unwrap().parse().unwrap();
+        assert!(num >= 3, "恢复后新任务 id 应跳过已用 id: {new_tid}");
+    }
+
+    #[tokio::test]
+    async fn restore_add_failure_marks_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("tasks.json");
+        let fake = Arc::new(FakeEngine::new(EngineKind::Http));
+        let state = Arc::new(DaemonState::new(fake.clone(), vec![]).with_storage(store.clone()));
+        let tid = state
+            .add_http_task("https://example.com/gone.bin".into(), None)
+            .await
+            .unwrap();
+        wait_file(&store, 2000);
+
+        let fake2 = Arc::new(FakeEngine::new(EngineKind::Http));
+        fake2.fail_url("https://example.com/gone.bin");
+        let state2 = DaemonState::new(fake2.clone(), vec![]);
+        let n = state2.restore_from(&store).await.unwrap();
+        assert_eq!(n, 0, "add 失败不计入恢复数");
+        let rec = state2.tasks.lock().unwrap().get(&tid).cloned().unwrap();
+        assert_eq!(rec.task.state, TaskState::Failed, "add 失败任务标 Failed");
+        assert!(rec.engine_tid.is_none());
+    }
+
+    #[tokio::test]
+    async fn no_storage_no_autosave() {
+        let fake = Arc::new(FakeEngine::new(EngineKind::Http));
+        let state = DaemonState::new(fake.clone(), vec![]);
+        let _ = state
+            .add_http_task("https://example.com/x.bin".into(), None)
+            .await
+            .unwrap();
+        // 无 persist_path → 无写盘（autosave 直接 return）
+        // 此测试验证不 panic；写盘路径由 with_storage 测试覆盖。
+        assert!(fake.added().len() == 1);
     }
 }

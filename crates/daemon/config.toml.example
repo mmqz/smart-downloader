@@ -19,3 +19,7 @@ enabled = true
 [lock]
 # 单实例锁文件（重复启动 → 直接退出）
 path = "./daemon.lock"
+
+[storage]
+# 任务持久化文件（add/remove/状态变更自动落盘；启动时恢复任务）
+tasks_path = "./tasks.json"
