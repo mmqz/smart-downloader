@@ -4,10 +4,7 @@
 //! - `thunder://` 内容 = base64("AA" + 真实URL + "ZZ")（§7.1 D36）
 //! - `qqdl://`  内容 = base64(真实URL)，无 AA/ZZ 壳
 
-use base64::engine::general_purpose::STANDARD as B64;
-use base64::Engine;
-
-use crate::source_parse::thunder::decode_thunder;
+use crate::source_parse::thunder::{decode_base64_lenient, decode_thunder};
 
 /// 归一化后的下载源分类（DaemonState::add_link_task 消费）。
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -41,7 +38,7 @@ pub fn normalize_user_link(link: &str) -> NormalizedSource {
         };
     }
     if let Some(rest) = link.strip_prefix("qqdl://") {
-        return match B64.decode(rest.as_bytes()) {
+        return match decode_base64_lenient(rest) {
             Ok(bytes) => {
                 let real = String::from_utf8_lossy(&bytes).into_owned();
                 if is_http(&real) {
@@ -65,6 +62,8 @@ pub fn normalize_user_link(link: &str) -> NormalizedSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
 
     fn enc_b64(s: &str) -> String {
         B64.encode(s.as_bytes())

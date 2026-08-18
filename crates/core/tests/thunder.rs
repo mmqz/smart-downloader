@@ -37,11 +37,11 @@ fn invalid_base64_is_error() {
 }
 
 #[test]
-fn missing_aa_zz_shell_is_error() {
-    // base64("http://example.com") 无 AA/ZZ 壳
+fn no_shell_falls_back_to_url() {
+    // P0 增强：无 AA/ZZ 壳的老格式 base64(url) → 兜底成功
     let s = base64::engine::general_purpose::STANDARD.encode(b"http://example.com");
     let r = decode_thunder(&format!("thunder://{s}"));
-    assert!(matches!(r, Err(ThunderError::MissingShell)));
+    assert_eq!(r.unwrap(), "http://example.com");
 }
 
 #[test]
