@@ -27,3 +27,4 @@ uuid = { version = "1", features = ["v4"] }
 url = "2"
 sha1 = "0.10"
 base64 = "0.22"
+fs2 = "0.4"

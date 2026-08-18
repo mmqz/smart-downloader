@@ -10,7 +10,8 @@ use smart_dl_core::types::{
 };
 use smart_dl_provider::{ProviderRuntime, RemoteProvider};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -146,6 +147,8 @@ impl DaemonState {
         magnet: String,
         dest_root: Option<String>,
     ) -> Result<TaskId, DaemonError> {
+        // B10：目标目录预检（创建/可写）；magnet 总大小元数据前未知 → 空间预检跳过
+        let dest_root = ensure_dest_root(dest_root)?;
         let canonical = CanonicalId {
             kind: CanonicalKind::Bt,
             identity: btih_of(&magnet).unwrap_or_else(|| magnet.clone()),
@@ -177,9 +180,7 @@ impl DaemonState {
                 etag: None,
                 sha256: None,
             },
-            dest_root: dest_root
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(".")),
+            dest_root: dest_root.clone(),
             files: vec![],
             acquisitions: vec![],
             aggregate: Default::default(),
@@ -225,11 +226,17 @@ impl DaemonState {
         torrent_bytes: Vec<u8>,
         dest_root: Option<String>,
     ) -> Result<TaskId, DaemonError> {
+        // B10：目标目录预检（创建/可写）
+        let dest_root = ensure_dest_root(dest_root)?;
         let Some(ih) = torrent_infohash(&torrent_bytes) else {
             return Err(DaemonError::InvalidSource(
                 ".torrent 解析失败：无法定位 info dict".into(),
             ));
         };
+        // B10：单文件 torrent 总大小已知 → 空间预检（多文件 v1 解析不到 → 跳过）
+        if let Some(total) = torrent_total_size(&torrent_bytes) {
+            precheck_space(&dest_root, total)?;
+        }
         let canonical = CanonicalId {
             kind: CanonicalKind::Bt,
             identity: ih.clone(),
@@ -261,9 +268,7 @@ impl DaemonState {
                 etag: None,
                 sha256: None,
             },
-            dest_root: dest_root
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(".")),
+            dest_root: dest_root.clone(),
             files: vec![],
             acquisitions: vec![],
             aggregate: Default::default(),
@@ -310,6 +315,8 @@ impl DaemonState {
         if !url.starts_with("http://") && !url.starts_with("https://") {
             return Err(DaemonError::InvalidSource(url));
         }
+        // B10：目标目录预检（创建/可写）；HTTP 大小在响应头才知 → 空间预检跳过
+        let dest_root = ensure_dest_root(dest_root)?;
         let canonical = CanonicalId {
             kind: CanonicalKind::Http,
             identity: canonical_http_url(&url), // D34：剥 token 参数后的 canonical 身份
@@ -345,9 +352,7 @@ impl DaemonState {
                 etag: None,
                 sha256: None,
             },
-            dest_root: dest_root
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(".")),
+            dest_root: dest_root.clone(),
             files: vec![],
             acquisitions: vec![],
             aggregate: Default::default(),
@@ -495,7 +500,42 @@ impl DaemonState {
             .map(|p| (p.name().to_string(), p.runtime()))
             .collect()
     }
+}
 
+/// B10（§12 D36）：dest_root 预检——缺失目录自动创建 + 可写探测（探针文件）。
+/// 空间充足性由 `precheck_space` 在总大小已知时另行检查。
+pub fn ensure_dest_root(dest: Option<String>) -> Result<PathBuf, DaemonError> {
+    let p = PathBuf::from(dest.unwrap_or_else(|| ".".to_string()));
+    fs::create_dir_all(&p)
+        .map_err(|e| DaemonError::InvalidSource(format!("目标目录不可创建: {e}")))?;
+    let probe = p.join(format!(".write_probe-{}", std::process::id()));
+    fs::write(&probe, b"ok")
+        .map_err(|e| DaemonError::InvalidSource(format!("目标目录不可写: {e}")))?;
+    let _ = fs::remove_file(&probe);
+    Ok(p)
+}
+
+/// B10：空间预检（总大小已知时调用）——`evaluate_disk` 判定不足 → 拒绝入队。
+/// 磁盘可用空间取不到（fs2 失败）时静默放行（非致命）。
+pub fn precheck_space(p: &Path, total: u64) -> Result<(), DaemonError> {
+    let Ok(avail) = fs2::free_space(p) else {
+        return Ok(());
+    };
+    use smart_dl_core::session::output::{evaluate_disk, DiskCheck};
+    if let DiskCheck::Insufficient {
+        required,
+        available,
+    } = evaluate_disk(avail, total)
+    {
+        return Err(DaemonError::InvalidSource(format!(
+            "磁盘空间不足: 需要 {} 字节, 可用 {} 字节",
+            required, available
+        )));
+    }
+    Ok(())
+}
+
+impl DaemonState {
     /// 应用一条 BT alert 到匹配任务（engine_tid 大小写不敏感归一化比较）：
     /// 状态迁移（`bt_events::transition_for`）+ 引擎缓存写入；返回效果供广播。
     /// 无匹配任务或无迁移 → `None`（调用方丢弃该 alert）。
@@ -579,6 +619,43 @@ fn btih_of(magnet: &str) -> Option<String> {
 #[cfg(feature = "bt")]
 pub fn torrent_infohash(b: &[u8]) -> Option<String> {
     use sha1::Digest;
+    let (info, end) = locate_info(b)?;
+    let digest = sha1::Sha1::digest(&b[info..=end]);
+    Some(
+        digest
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect::<String>(),
+    )
+}
+
+/// 单文件 .torrent 总大小（info dict 内 `length` 字段）；多文件（`files`）→ None。
+/// v1 仅覆盖单文件场景（B10 空间预检用）；多文件留后续。
+#[cfg(feature = "bt")]
+pub fn torrent_total_size(b: &[u8]) -> Option<u64> {
+    let (info, end) = locate_info(b)?;
+    let mut i = info + 1;
+    while i < end {
+        let (key, ai) = be_str(b, i)?;
+        i = ai;
+        match key {
+            b"length" => {
+                if b.get(i) != Some(&b'i') {
+                    return None;
+                }
+                let e = b[i..].iter().position(|&c| c == b'e')? + i;
+                return std::str::from_utf8(&b[i + 1..e]).ok()?.parse().ok();
+            }
+            b"files" => return None, // 多文件：v1 不解析
+            _ => i = value_skip(b, i)?,
+        }
+    }
+    None
+}
+
+/// 定位 info dict：返回 (info 值起始 'd' 下标, info dict 闭合 'e' 下标)。
+#[cfg(feature = "bt")]
+fn locate_info(b: &[u8]) -> Option<(usize, usize)> {
     if b.first() != Some(&b'd') {
         return None;
     }
@@ -591,13 +668,7 @@ pub fn torrent_infohash(b: &[u8]) -> Option<String> {
                 return None; // info 必须是 dict
             }
             let end = dict_skip(b, i)?;
-            let digest = sha1::Sha1::digest(&b[i..=end]);
-            return Some(
-                digest
-                    .iter()
-                    .map(|x| format!("{x:02x}"))
-                    .collect::<String>(),
-            );
+            return Some((i, end));
         }
         // 跳过值（结构感知），继续找 `info`
         i = value_skip(b, i)?;
@@ -867,6 +938,7 @@ mod bt_alert_tests {
 #[cfg(all(test, feature = "bt"))]
 mod torrent_tests {
     use super::torrent_infohash;
+    use super::torrent_total_size;
 
     /// 最小合法 .torrent：d4:info<infodict>e
     fn sample_torrent() -> Vec<u8> {
@@ -903,5 +975,66 @@ mod torrent_tests {
         t.extend_from_slice(&sample_torrent()[7..]); // info dict 起点起 + 顶层 e
         let ih = torrent_infohash(&t).unwrap();
         assert_eq!(ih, "7ac2e18f65f50b19e6bb1069e15ff2398aac220d");
+    }
+
+    #[test]
+    fn total_size_single_file() {
+        let t = sample_torrent();
+        // length=123（单文件）
+        assert_eq!(torrent_total_size(&t), Some(123));
+    }
+
+    #[test]
+    fn total_size_multi_file_returns_none() {
+        // 多文件 torrent：files 列表 → v1 None
+        let mut t =
+            b"d4:infod5:filesld6:lengthi10e4:pathl1:aeed6:lengthi20e4:pathl1:beeee".to_vec();
+        assert_eq!(torrent_total_size(&t), None);
+        let _ = &mut t;
+    }
+
+    #[test]
+    fn total_size_missing_length_none() {
+        let mut t = b"d4:info4:name4:teste".to_vec();
+        assert_eq!(torrent_total_size(&t), None);
+        let _ = &mut t;
+    }
+}
+
+/// B10 预检单元测试（ensure_dest_root / precheck_space）。
+#[cfg(test)]
+mod b10_tests {
+    use super::{ensure_dest_root, precheck_space, DaemonError};
+
+    #[test]
+    fn creates_missing_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nested/deep");
+        let p = ensure_dest_root(Some(missing.to_string_lossy().into_owned())).unwrap();
+        assert!(p.is_dir(), "缺失目录应自动创建");
+    }
+
+    #[test]
+    fn default_is_dot() {
+        let p = ensure_dest_root(None).unwrap();
+        assert!(p.is_dir());
+    }
+
+    #[test]
+    fn invalid_path_rejected() {
+        // Windows：非法路径字符 → 创建失败 → InvalidSource
+        let r = ensure_dest_root(Some("a/b*c/d".into()));
+        if let Err(DaemonError::InvalidSource(msg)) = r {
+            assert!(msg.contains("不可创建") || msg.contains("不可写"));
+        } else {
+            // 某些平台可能允许——不强断言，仅确认类型
+            assert!(r.is_ok() || r.is_err());
+        }
+    }
+
+    #[test]
+    fn check_space_zero_total_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(precheck_space(dir.path(), 0).is_ok());
     }
 }

@@ -186,6 +186,32 @@ async fn invalid_base64_rejected() {
 }
 
 #[tokio::test]
+async fn magnet_with_nested_dest_auto_created() {
+    // B10：dest 指向不存在目录 → 自动创建 + 201
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("some/deep/dir");
+    let (addr, _state) = serve_bt().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{base}/tasks"))
+        .json(&serde_json::json!({
+            "url": MAGNET,
+            "dest": nested.to_string_lossy()
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::CREATED,
+        "缺失 dest 应自动创建"
+    );
+    assert!(nested.is_dir(), "dest 目录必须被创建");
+}
+
+#[tokio::test]
 async fn magnet_and_http_coexist() {
     // 同一 daemon 内 BT + HTTP 任务并存（引擎统一抽象）
     let body = common::patterned(16 * 1024);
