@@ -1,8 +1,10 @@
 //! .part 续传决策（§14 ETag 策略）：
 //! ETag 一致 → 续传；ETag 不一致但服务器尊重 Range（试探 206）→ 续传；
 //! 忽略 Range(200)/416/Length 变化 → 重下。
+//! 附带 .part 的 ETag 持久化（`<part>.etag` 副文件，UTF-8 文本）。
 
 use crate::range::Probe;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ResumeDecision {
@@ -28,5 +30,33 @@ pub fn decide_resume(part_len: u64, part_etag: Option<&str>, probe: &Probe) -> R
         ResumeDecision::ContinueFrom(part_len)
     } else {
         ResumeDecision::Restart
+    }
+}
+
+/// .part 旁 ETag 副文件路径：`<part>.etag`。
+pub fn part_etag_path(part: &Path) -> PathBuf {
+    let mut s = part.as_os_str().to_os_string();
+    s.push(".etag");
+    PathBuf::from(s)
+}
+
+/// 读取 .part 的持久化 ETag（无副文件 → None）。
+pub fn read_part_etag(part: &Path) -> Option<String> {
+    std::fs::read_to_string(part_etag_path(part))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 持久化 .part 的 ETag；`etag=None` → 删除副文件。
+pub fn write_part_etag(part: &Path, etag: Option<&str>) {
+    let p = part_etag_path(part);
+    match etag {
+        Some(e) if !e.is_empty() => {
+            let _ = std::fs::write(&p, e);
+        }
+        _ => {
+            let _ = std::fs::remove_file(&p);
+        }
     }
 }

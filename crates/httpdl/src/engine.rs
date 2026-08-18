@@ -3,7 +3,8 @@
 
 use crate::download::download_segments;
 use crate::range::probe_range;
-use crate::static_split::plan_segments;
+use crate::resume;
+use crate::static_split::{plan_segments, plan_segments_from};
 use crate::verify::verify_file;
 use smart_dl_core::identity::ContentIdentity;
 use smart_dl_core::session::output::OutputManager;
@@ -117,6 +118,8 @@ async fn download_loop(
                             match finalize_part(&part, &dest, total) {
                                 Ok(()) => {
                                     cleanup_old_parts(&dest, gen);
+                                    // 落位完成 → 清理续传凭据（.part 已移动，etag 副文件删除）
+                                    let _ = std::fs::remove_file(resume::part_etag_path(&part));
                                     finish(&inner, &tid, EngineState::Completed, None);
                                 }
                                 Err(e) => finish(&inner, &tid, EngineState::Error, Some(e)),
@@ -131,14 +134,16 @@ async fn download_loop(
                                 t.verify_attempts
                             };
                             if attempts <= 1 {
-                                // 重下 1 次：作废 .part
-                                let _ = std::fs::remove_file(&part);
+                                // 重下 1 次：作废 .part（含 etag 副文件）
+                                remove_part(&part);
                                 continue;
                             }
                             // 降级接受 + 告警（Q-B5）
                             match finalize_part(&part, &dest, total) {
                                 Ok(()) => {
                                     cleanup_old_parts(&dest, gen);
+                                    // 落位完成 → 清理续传凭据（.part 已移动，etag 副文件删除）
+                                    let _ = std::fs::remove_file(resume::part_etag_path(&part));
                                     finish(
                                         &inner,
                                         &tid,
@@ -167,6 +172,7 @@ async fn download_loop(
                         match finalize_part(&part, &dest, total) {
                             Ok(()) => {
                                 cleanup_old_parts(&dest, gen);
+                                let _ = std::fs::remove_file(resume::part_etag_path(&part));
                                 finish(&inner, &tid, EngineState::Completed, None);
                             }
                             Err(e) => finish(&inner, &tid, EngineState::Error, Some(e)),
@@ -233,6 +239,12 @@ fn part_path_of(dest: &Path, gen: u64) -> PathBuf {
     }
 }
 
+/// 删除 .part 及其 ETag 副文件（作废重下/清理共用）。
+fn remove_part(part: &Path) {
+    let _ = std::fs::remove_file(part);
+    let _ = std::fs::remove_file(resume::part_etag_path(part));
+}
+
 /// finalize 成功后清理旧代次的 .part（gen0 的 `<dest>.part` 或上一 gen）。
 fn cleanup_old_parts(dest: &Path, gen: u64) {
     if gen > 0 {
@@ -269,7 +281,6 @@ impl DownloadEngine for HttpEngine {
         };
         let probe = probe_range(&self.client, &url, &headers).await?;
         let total = probe.total.unwrap_or(0);
-        let segments = plan_segments(total);
 
         let rel = task
             .metadata
@@ -277,6 +288,30 @@ impl DownloadEngine for HttpEngine {
             .clone()
             .unwrap_or_else(|| "download.bin".to_string());
         let dest = task.dest_root.join(&rel);
+        // 断点续传（#4）：.part 存在 → 探测+决策 → 从偏移续传或作废重下；
+        // 探测到的 ETag 持久化到 `<part>.etag` 供下次决策。
+        let part0 = part_path_of(&dest, 0);
+        let segments = if part0.exists() {
+            let part_len = std::fs::metadata(&part0).map(|m| m.len()).unwrap_or(0);
+            let part_etag = resume::read_part_etag(&part0);
+            match resume::decide_resume(part_len, part_etag.as_deref(), &probe) {
+                resume::ResumeDecision::ContinueFrom(off) => {
+                    println!(
+                        "[httpdl] 断点续传 {}: 从偏移 {off} 继续 (part_len={part_len})",
+                        task.id
+                    );
+                    plan_segments_from(off, total)
+                }
+                resume::ResumeDecision::Restart => {
+                    println!("[httpdl] 断点续传 {}: .part 不可信，作废重下", task.id);
+                    remove_part(&part0);
+                    plan_segments(total)
+                }
+            }
+        } else {
+            plan_segments(total)
+        };
+        resume::write_part_etag(&part0, probe.etag.as_deref());
         let sha256 = match &task.identity {
             ContentIdentity::SingleFile { sha256, .. } => sha256.clone(),
             _ => None,
