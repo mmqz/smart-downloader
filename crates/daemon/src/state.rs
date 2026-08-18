@@ -812,7 +812,7 @@ fn is_token_param(name: &str) -> bool {
 
 /// 从 magnet 提取 btih（40 hex，v1 规范 xt=urn:btih:）。无 → None（canonical 回落全文）。
 #[cfg(feature = "bt")]
-fn btih_of(magnet: &str) -> Option<String> {
+pub(crate) fn btih_of(magnet: &str) -> Option<String> {
     magnet.split('&').find_map(|p| {
         let v = p.strip_prefix("xt=urn:btih:")?;
         (v.len() == 40 && v.bytes().all(|b| b.is_ascii_hexdigit())).then(|| v.to_ascii_lowercase())

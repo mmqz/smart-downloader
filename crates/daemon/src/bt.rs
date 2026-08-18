@@ -4,8 +4,13 @@
 //! 返回的 infohash（40 hex）。magnet / .torrent 文件 → add_magnet / add_torrent_file。
 //! 状态映射：lt state 0 下载 / 1 完成 / 3 错误 / 4 元数据获取中（ABI100 无暂停态，
 //! 暂停以 alert 同步——v1 用 pause/resume 直调，状态以 status 为准）。
+//!
+//! **断点续传（#5 fastresume 显式保存）**：remove/pause 前 `request_save_resume` →
+//! 轮询 RESUME·ready alert → `take_resume_data` → 原子写 `<save_path>/<ih>.fastresume`。
+//! 重启后 add 同一 magnet/torrent 时按 infohash 查 `.fastresume` → `add_torrent_resume`
+//! 回灌 → libtorrent 恢复 piece 位图 + metadata，免全盘 checking / 免重新抓取 metadata。
 
-use smart_dl_btcore::{BtCore, TorrentStatus};
+use smart_dl_btcore::{AlertKind, BtCore, TorrentStatus};
 use smart_dl_core::task::DownloadTask;
 use smart_dl_core::types::{
     Capability, DownloadEngine, DownloadSource, EngineError, EngineKind, EngineState, EngineStatus,
@@ -57,8 +62,7 @@ fn map_status(st: &TorrentStatus) -> EngineStatus {
 /// **落盘语义（v1）**：单 session 全局落盘目录（`BtEngine::new` 的 save_path，serve 配置
 /// `[bt] save_path`）。`DownloadTask.dest_root` 仅接受与全局目录一致或默认 `"."`——
 /// 显式指定其他目录会返回错误（避免"用户指定 A 目录、实际落 B 目录"的静默错位）。
-/// **恢复续传**：重启后同一 save_path 重新 add 同一 magnet/torrent → libtorrent 磁盘检查复用
-/// 已下载块（无需 fastresume；resume 数据未接，checking 全盘但功能正确）。
+/// **断点续传（#5）**：remove/pause 显式保存 `.fastresume`；重启后 add 回灌。
 pub struct BtEngine {
     core: Arc<BtCore>,
     save_path: PathBuf,
@@ -67,21 +71,97 @@ pub struct BtEngine {
 impl BtEngine {
     /// 新建 BT 会话（save_path 为全局落盘目录，须已存在）。
     pub fn new(save_path: &Path) -> Result<Self, String> {
-        BtCore::new(save_path, "smart-dl-daemon")
-            .map(|core| BtEngine {
-                core: Arc::new(core),
-                save_path: save_path.to_path_buf(),
-            })
-            .map_err(|e| format!("bt session init: {}", core_err(&e)))
+        let core = BtCore::new(save_path, "smart-dl-daemon")
+            .map_err(|e| format!("bt session init: {}", core_err(&e)))?;
+        // 全量 alert mask：状态推进（bt_events）+ 续传凭据（save_resume_data alert）都需要
+        let _ = core.set_alert_mask(0xFFFF);
+        Ok(BtEngine {
+            core: Arc::new(core),
+            save_path: save_path.to_path_buf(),
+        })
     }
 
     pub fn core(&self) -> Arc<BtCore> {
         self.core.clone()
     }
+
+    /// .fastresume 文件路径（按 infohash 命名——避开文件名转义问题，且 magnet 无需
+    /// 知道 torrent 名即可定位）。
+    fn fastresume_path(&self, ih: &str) -> PathBuf {
+        self.save_path.join(format!("{ih}.fastresume"))
+    }
+
+    /// 读取已保存的 fastresume 数据（无 → None）。
+    fn load_fastresume(&self, ih: &str) -> Option<Vec<u8>> {
+        let p = self.fastresume_path(ih);
+        p.exists().then(|| std::fs::read(&p).ok()).flatten()
+    }
+
+    /// 显式保存 fastresume（#5）：request → 轮询 RESUME·ready alert（≤3s）→ take →
+    /// 原子写（tmp+rename）。resume 未就绪（暂无 metadata/超时）→ Ok(None) 不落盘。
+    /// 注意：这里同步轮询 pop_alerts，会与 bt_events 消费循环短暂竞态（v1 接受——
+    /// remove/pause 为低频操作，窗口 ≤3s；丢失的仅为非终态 alert）。
+    fn save_fastresume(&self, ih: &str) -> Result<Option<PathBuf>, EngineError> {
+        self.core
+            .request_save_resume(ih)
+            .map_err(|e| EngineError::Other(core_err(&e)))?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut saved: Option<smart_dl_btcore::ResumeBytes> = None;
+        let mut seen = 0usize;
+        while std::time::Instant::now() < deadline {
+            for a in self
+                .core
+                .pop_alerts(256)
+                .map_err(|e| EngineError::Other(core_err(&e)))?
+            {
+                seen += 1;
+                if a.kind == AlertKind::Resume {
+                    tracing::debug!("fastresume: RESUME alert ready={}", a.is_resume_ready());
+                    if a.is_resume_ready() {
+                        if let Ok(r) = self.core.take_resume_data(ih) {
+                            saved = Some(r);
+                        } else {
+                            tracing::warn!("fastresume: take_resume_data 失败（未就绪）");
+                        }
+                    }
+                }
+            }
+            if saved.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if saved.is_none() {
+            tracing::warn!("fastresume: {ih} 3s 内未就绪（alerts 见 {seen} 条）");
+            return Ok(None);
+        }
+        let r = saved.expect("saved checked");
+        let p = self.fastresume_path(ih);
+        let tmp = p.with_extension("fastresume.tmp");
+        std::fs::write(&tmp, r.as_bytes())
+            .map_err(|e| EngineError::Other(format!("写 fastresume 失败: {e}")))?;
+        std::fs::rename(&tmp, &p)
+            .map_err(|e| EngineError::Other(format!("落位 fastresume 失败: {e}")))?;
+        Ok(Some(p))
+    }
+
+    /// 删除 .fastresume（delete_data 时清理）。
+    fn remove_fastresume(&self, ih: &str) {
+        let _ = std::fs::remove_file(self.fastresume_path(ih));
+    }
 }
 
 fn core_err(e: &smart_dl_btcore::Error) -> String {
     format!("{:?}", e)
+}
+
+/// 从任务 source 提取 infohash hint（fastresume 定位用）：magnet → btih；.torrent → SHA1(info)。
+fn btih_hint(task: &DownloadTask) -> Option<String> {
+    match &task.source {
+        DownloadSource::Magnet(m) => crate::state::btih_of(m),
+        DownloadSource::TorrentFile(b) => crate::state::torrent_infohash(b),
+        _ => None,
+    }
 }
 
 #[async_trait::async_trait]
@@ -114,10 +194,20 @@ impl DownloadEngine for BtEngine {
                 self.save_path, task.dest_root
             )));
         }
+        // #5 fastresume 回灌：按输入提取 ih → 查 `.fastresume` → add_torrent_resume
+        // （恢复 piece 位图 + metadata，免全盘 checking / 免重新抓取）。
+        let ih_hint = btih_hint(task);
+        let fastresume = ih_hint.as_deref().and_then(|ih| self.load_fastresume(ih));
         let web_seeds: Vec<String> = vec![];
         let ih = match &task.source {
-            DownloadSource::Magnet(m) => self.core.add_magnet(m, &web_seeds),
-            DownloadSource::TorrentFile(bytes) => self.core.add_torrent_file(bytes, &web_seeds),
+            DownloadSource::Magnet(m) => match &fastresume {
+                Some(data) => self.core.add_torrent_resume(data, &web_seeds),
+                None => self.core.add_magnet(m, &web_seeds),
+            },
+            DownloadSource::TorrentFile(bytes) => match &fastresume {
+                Some(data) => self.core.add_torrent_resume(data, &web_seeds),
+                None => self.core.add_torrent_file(bytes, &web_seeds),
+            },
             _ => return Err(EngineError::Other("source is not bt".to_string())),
         };
         ih.map_err(|e| EngineError::Other(core_err(&e)))
@@ -126,7 +216,10 @@ impl DownloadEngine for BtEngine {
     async fn pause(&self, id: &EngineTaskId) -> Result<(), EngineError> {
         self.core
             .pause(id)
-            .map_err(|e| EngineError::Other(core_err(&e)))
+            .map_err(|e| EngineError::Other(core_err(&e)))?;
+        // 暂停时保存进度（best-effort；无 metadata 等场景静默跳过）
+        let _ = self.save_fastresume(id);
+        Ok(())
     }
 
     async fn resume(&self, id: &EngineTaskId) -> Result<(), EngineError> {
@@ -144,9 +237,17 @@ impl DownloadEngine for BtEngine {
     }
 
     async fn remove(&self, id: &EngineTaskId, delete_data: bool) -> Result<(), EngineError> {
+        // #5：移除前显式保存 fastresume（重启后重新 add 同一 magnet → 回灌续传）。
+        // 失败不阻断移除（best-effort）。
+        let _ = self.save_fastresume(id);
         self.core
             .remove(id, delete_data)
-            .map_err(|e| EngineError::Other(core_err(&e)))
+            .map_err(|e| EngineError::Other(core_err(&e)))?;
+        // 数据删除 → 续传凭据一并清理
+        if delete_data {
+            self.remove_fastresume(id);
+        }
+        Ok(())
     }
 
     async fn peers(&self, id: &EngineTaskId) -> Result<Vec<PeerInfo>, EngineError> {
