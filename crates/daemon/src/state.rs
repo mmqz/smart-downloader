@@ -31,7 +31,8 @@ pub struct TaskRecord {
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct TaskSnapshot {
     pub task_id: String,
-    pub state: TaskState,
+    /// 状态字符串（`Downloading(Http)` → `"Downloading"`；API 消费者无需解析枚举负载）。
+    pub state: String,
     pub source: String,
     pub dest_root: PathBuf,
     pub engine: Option<String>,
@@ -44,8 +45,15 @@ pub struct TaskSnapshot {
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct TaskSummary {
     pub task_id: String,
-    pub state: TaskState,
+    /// 状态字符串（同上）。
+    pub state: String,
     pub source: String,
+}
+
+/// 快照用状态标签：取枚举 Debug 的变体名部分。
+pub fn state_label(s: &TaskState) -> String {
+    let d = format!("{s:?}");
+    d.split('(').next().unwrap_or(&d).to_string()
 }
 
 /// BT alert 应用结果（task_id + 状态迁移 + 消息），供事件广播使用。
@@ -516,8 +524,8 @@ impl DaemonState {
             _ => (None, None),
         };
         let state = match &status {
-            Some(s) => engine_state_to_task(&s.state, rec.engine_kind),
-            None => rec.task.state.clone(),
+            Some(s) => state_label(&engine_state_to_task(&s.state, rec.engine_kind)),
+            None => state_label(&rec.task.state),
         };
         Some(TaskSnapshot {
             task_id: id.to_string(),
@@ -538,7 +546,7 @@ impl DaemonState {
             .iter()
             .map(|(id, rec)| TaskSummary {
                 task_id: id.clone(),
-                state: rec.task.state.clone(),
+                state: state_label(&rec.task.state),
                 source: format!("{:?}", rec.task.source),
             })
             .collect()

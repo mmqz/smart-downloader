@@ -44,6 +44,8 @@ pub enum CliError {
     Unknown(String),
     #[error("missing argument for {0}")]
     MissingArg(String),
+    #[error("http: {0}")]
+    Http(String),
 }
 
 impl Cli {

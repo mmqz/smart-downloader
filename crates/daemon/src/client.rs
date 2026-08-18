@@ -1,0 +1,234 @@
+//! CLI 执行层：CliCommand → serve HTTP API 调用 + 输出（--json 全局标志）。
+//! 未映射到 API 的命令（logs/config/fallback）给出明确提示（v1 无对应端点）。
+
+use crate::cli::{CliCommand, CliError};
+
+pub struct CliClient {
+    base: String,
+    client: reqwest::Client,
+}
+
+/// 非 2xx → 提取响应体 {error} 转 Err；否则返回原响应。
+async fn ensure_ok(resp: reqwest::Response) -> Result<reqwest::Response, CliError> {
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        let msg = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| format!("HTTP {}", status));
+        return Err(CliError::Http(msg));
+    }
+    Ok(resp)
+}
+
+impl CliClient {
+    pub fn new(base: &str) -> Self {
+        CliClient {
+            base: base.trim_end_matches('/').to_string(),
+            client: reqwest::Client::new(),
+        }
+    }
+
+    /// 执行命令；输出到 stdout。错误（含 HTTP 非 2xx）→ Err。
+    pub async fn run(&self, cmd: &CliCommand, json: bool) -> Result<(), CliError> {
+        match cmd {
+            CliCommand::Add { url, dest } => self.add(url, dest.as_deref(), json).await,
+            CliCommand::Pause { task_id } => self.action("pause", task_id, json).await,
+            CliCommand::Resume { task_id } => self.action("resume", task_id, json).await,
+            CliCommand::Remove { task_id } => {
+                let resp = self
+                    .client
+                    .delete(format!("{}/tasks/{}", self.base, task_id))
+                    .send()
+                    .await
+                    .map_err(|e| CliError::Http(e.to_string()))?;
+                self.check(resp, json).await?;
+                if !json {
+                    println!("已删除: {task_id}");
+                }
+                Ok(())
+            }
+            CliCommand::List => self.list(json).await,
+            CliCommand::Status { task_id } => self.status(task_id, json).await,
+            CliCommand::Logs { task_id } => {
+                // v1 无 logs 端点：退化为状态快照（含 engine_status）
+                self.status(task_id, json).await
+            }
+            CliCommand::Config => Err(CliError::Http(
+                "config 命令 v1 无对应端点（serve 配置见 config.toml）".into(),
+            )),
+            CliCommand::Fallback { task_id } => Err(CliError::Http(format!(
+                "fallback 命令 v1 无对应端点（Q-B9 兜底未接入 API）: {task_id}"
+            ))),
+        }
+    }
+
+    async fn add(&self, url: &str, dest: Option<&str>, json: bool) -> Result<(), CliError> {
+        let mut body = serde_json::Map::new();
+        body.insert("url".into(), serde_json::Value::String(url.to_string()));
+        if let Some(d) = dest {
+            body.insert("dest".into(), serde_json::Value::String(d.to_string()));
+        }
+        let resp = self
+            .client
+            .post(format!("{}/tasks", self.base))
+            .json(&serde_json::Value::Object(body))
+            .send()
+            .await
+            .map_err(|e| CliError::Http(e.to_string()))?;
+        self.check(resp, json).await?;
+        // 201: {"task_id": ...}；由 check 输出（json 模式）或这里打印
+        if !json {
+            // check 已消费 201 响应体到 json 打印；此处补人读输出
+            println!("任务已添加（结果见上，或 --json 查看 task_id）");
+        }
+        Ok(())
+    }
+
+    async fn action(&self, action: &str, task_id: &str, json: bool) -> Result<(), CliError> {
+        let resp = self
+            .client
+            .post(format!("{}/tasks/{}/{}", self.base, task_id, action))
+            .send()
+            .await
+            .map_err(|e| CliError::Http(e.to_string()))?;
+        self.check(resp, json).await?;
+        if !json {
+            println!("已{action}: {task_id}");
+        }
+        Ok(())
+    }
+
+    async fn list(&self, json: bool) -> Result<(), CliError> {
+        let resp = ensure_ok(
+            self.client
+                .get(format!("{}/tasks", self.base))
+                .send()
+                .await
+                .map_err(|e| CliError::Http(e.to_string()))?,
+        )
+        .await?;
+        if json {
+            let text = resp
+                .text()
+                .await
+                .map_err(|e| CliError::Http(e.to_string()))?;
+            println!("{text}");
+            return Ok(());
+        }
+        let tasks: Vec<serde_json::Value> = resp
+            .json()
+            .await
+            .map_err(|e| CliError::Http(e.to_string()))?;
+        for t in tasks {
+            println!("{}", list_line(&t));
+        }
+        Ok(())
+    }
+
+    async fn status(&self, task_id: &str, json: bool) -> Result<(), CliError> {
+        let resp = ensure_ok(
+            self.client
+                .get(format!("{}/tasks/{}", self.base, task_id))
+                .send()
+                .await
+                .map_err(|e| CliError::Http(e.to_string()))?,
+        )
+        .await?;
+        if json {
+            let text = resp
+                .text()
+                .await
+                .map_err(|e| CliError::Http(e.to_string()))?;
+            println!("{text}");
+            return Ok(());
+        }
+        let t: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| CliError::Http(e.to_string()))?;
+        let mut lines: Vec<(String, String)> = vec![
+            (
+                "task_id".into(),
+                t["task_id"].as_str().unwrap_or("?").into(),
+            ),
+            ("state".into(), t["state"].as_str().unwrap_or("?").into()),
+            ("engine".into(), t["engine"].as_str().unwrap_or("?").into()),
+            ("source".into(), summarize(&t)),
+        ];
+        if let Some(e) = t["engine_status"]["error"].as_str() {
+            lines.push(("error".into(), e.to_string()));
+        }
+        let w = lines.iter().map(|(k, _)| k.len()).max().unwrap_or(4);
+        for (k, v) in lines {
+            println!("{k:<w$}  {v}");
+        }
+        Ok(())
+    }
+
+    /// 非 2xx → 提取 {error} 转 Err；json 模式打印响应体；否则静默（动作输出由调用方打印）。
+    async fn check(&self, resp: reqwest::Response, json: bool) -> Result<(), CliError> {
+        let resp = ensure_ok(resp).await?;
+        if json {
+            let text = resp
+                .text()
+                .await
+                .map_err(|e| CliError::Http(e.to_string()))?;
+            println!("{text}");
+        }
+        Ok(())
+    }
+}
+
+/// 人读摘要：从快照提取源信息（url/magnet/torrent）。
+fn summarize(t: &serde_json::Value) -> String {
+    if let Some(s) = t["source"].as_str() {
+        return s.chars().take(72).collect();
+    }
+    if let Some(s) = t["summary"].as_str() {
+        return s.chars().take(72).collect();
+    }
+    "?".into()
+}
+
+// —— 测试辅助：纯格式化逻辑（无网络） ——
+
+/// 人读的任务列表行（供测试：不依赖 HTTP）。
+pub fn list_line(t: &serde_json::Value) -> String {
+    format!(
+        "{}  {}  {}",
+        t["task_id"].as_str().unwrap_or("?"),
+        t["state"].as_str().unwrap_or("?"),
+        summarize(t)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summarize_url_truncated() {
+        let v = serde_json::json!({
+            "task_id": "t1",
+            "state": "Downloading",
+            "source": "Http { url: \"https://example.com/very/long/path/file.bin\", headers: [], auth: None }"
+        });
+        let line = list_line(&v);
+        assert!(line.starts_with("t1  Downloading  Http { url"));
+        assert!(line.len() <= 72 + 20, "摘要应截断: {line}");
+    }
+
+    #[test]
+    fn summarize_missing_source() {
+        let v = serde_json::json!({ "task_id": "t2" });
+        assert!(list_line(&v).contains('?'));
+    }
+
+    #[test]
+    fn base_url_trims_slash() {
+        let c = CliClient::new("http://x:1/");
+        assert_eq!(c.base, "http://x:1");
+    }
+}

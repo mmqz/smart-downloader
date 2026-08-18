@@ -107,3 +107,111 @@ fn missing_argument_rejected() {
         Err(CliError::MissingArg(_))
     ));
 }
+
+// —— 执行层集成：真实 serve + CLI 客户端往返 ——
+
+mod common;
+
+use smart_dl_daemon::client::CliClient;
+use smart_dl_daemon::http;
+use smart_dl_daemon::state::DaemonState;
+use std::sync::Arc;
+
+#[tokio::test]
+async fn cli_add_list_status_roundtrip() {
+    let engine = smart_dl_httpdl::HttpEngine::new(reqwest::Client::new());
+    let state = Arc::new(DaemonState::new(Arc::new(engine), vec![]));
+    let app = http::router(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let base = format!("http://{addr}");
+    let client = CliClient::new(&base);
+
+    let srv = common::TestServer::start(common::patterned(1024)).await;
+    let url = srv.url();
+
+    // add → 成功（默认 dest）
+    client
+        .run(
+            &CliCommand::Add {
+                url: url.clone(),
+                dest: None,
+            },
+            false,
+        )
+        .await
+        .unwrap();
+
+    // 重复 add 同 URL → 409 → Err（错误信息含 duplicate）
+    let dup = client
+        .run(
+            &CliCommand::Add {
+                url: url.clone(),
+                dest: None,
+            },
+            false,
+        )
+        .await;
+    assert!(dup.is_err(), "重复 add 应报错 409: {dup:?}");
+    assert!(dup.unwrap_err().to_string().contains("duplicate"));
+
+    // list → 任务 t1 在列
+    client.run(&CliCommand::List, false).await.unwrap();
+
+    // status t1 → 字段齐全
+    client
+        .run(
+            &CliCommand::Status {
+                task_id: "t1".into(),
+            },
+            false,
+        )
+        .await
+        .unwrap();
+
+    // remove → 清除
+    client
+        .run(
+            &CliCommand::Remove {
+                task_id: "t1".into(),
+            },
+            false,
+        )
+        .await
+        .unwrap();
+    // 删除后再查 → 404 → Err
+    let gone = client
+        .run(
+            &CliCommand::Status {
+                task_id: "t1".into(),
+            },
+            false,
+        )
+        .await;
+    assert!(gone.is_err(), "删除后 status 应 404: {gone:?}");
+}
+
+#[tokio::test]
+async fn cli_json_output_success() {
+    let engine = smart_dl_httpdl::HttpEngine::new(reqwest::Client::new());
+    let state = Arc::new(DaemonState::new(Arc::new(engine), vec![]));
+    let app = http::router(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let base = format!("http://{addr}");
+    let client = CliClient::new(&base);
+
+    // 空列表 --json 输出
+    client.run(&CliCommand::List, true).await.unwrap();
+
+    // 未实现命令 → 明确提示
+    let cfg = client.run(&CliCommand::Config, false).await;
+    assert!(cfg.is_err());
+    assert!(cfg.unwrap_err().to_string().contains("无对应端点"));
+}

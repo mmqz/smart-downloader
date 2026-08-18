@@ -6,6 +6,7 @@ pub mod bt;
 #[cfg(feature = "bt")]
 pub mod bt_events;
 pub mod cli;
+pub mod client;
 pub mod config;
 pub mod events;
 pub mod health;
