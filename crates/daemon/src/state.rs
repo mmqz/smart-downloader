@@ -217,6 +217,90 @@ impl DaemonState {
         Ok(task_id)
     }
 
+    /// 添加 .torrent 文件任务（feature `bt`）：infohash canonical 查重 → 引擎
+    /// add_torrent_file → TaskCreated 事件。torrent 字节来自 API base64 解码。
+    #[cfg(feature = "bt")]
+    pub async fn add_torrent_task(
+        &self,
+        torrent_bytes: Vec<u8>,
+        dest_root: Option<String>,
+    ) -> Result<TaskId, DaemonError> {
+        let Some(ih) = torrent_infohash(&torrent_bytes) else {
+            return Err(DaemonError::InvalidSource(
+                ".torrent 解析失败：无法定位 info dict".into(),
+            ));
+        };
+        let canonical = CanonicalId {
+            kind: CanonicalKind::Bt,
+            identity: ih.clone(),
+            validator: None,
+            token_sensitive: false,
+        };
+        let task_id = format!("t{}", self.next_id.fetch_add(1, Ordering::SeqCst));
+
+        // 查重（canonical 一致 → DuplicateRejected）
+        {
+            let tasks = self.tasks.lock().unwrap();
+            for (existing, rec) in tasks.iter() {
+                if rec.task.canonical_id == canonical {
+                    self.hub.publish(SchedulerEvent::DuplicateRejected {
+                        task_id: task_id.clone(),
+                        existing: existing.clone(),
+                    });
+                    return Err(DaemonError::Duplicate(existing.clone()));
+                }
+            }
+        }
+
+        let task = DownloadTask {
+            id: task_id.clone(),
+            canonical_id: canonical,
+            source: DownloadSource::TorrentFile(torrent_bytes),
+            identity: ContentIdentity::SingleFile {
+                size: 0,
+                etag: None,
+                sha256: None,
+            },
+            dest_root: dest_root
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(".")),
+            files: vec![],
+            acquisitions: vec![],
+            aggregate: Default::default(),
+            state: TaskState::Queued,
+            retry: Default::default(),
+            created_at: std::time::Instant::now(),
+            metadata: TaskMetadata {
+                name: None,
+                added_at_unix: 0,
+            },
+        };
+
+        let engine_tid = self
+            .engine_for(EngineKind::Bt)?
+            .add(&task)
+            .await
+            .map_err(|e| DaemonError::Engine(e.to_string()))?;
+        self.tasks.lock().unwrap().insert(
+            task_id.clone(),
+            TaskRecord {
+                task,
+                engine_tid: Some(engine_tid),
+                engine_kind: EngineKind::Bt,
+                engine_status: None,
+            },
+        );
+        self.hub.publish(SchedulerEvent::TaskCreated {
+            task_id: task_id.clone(),
+        });
+        self.hub.publish(SchedulerEvent::StateChanged {
+            task_id: task_id.clone(),
+            from: TaskState::Queued,
+            to: TaskState::Downloading(EngineKind::Bt),
+        });
+        Ok(task_id)
+    }
+
     /// 添加 HTTP 任务：canonical 查重 → HttpEngine.add → TaskCreated 事件。
     pub async fn add_http_task(
         &self,
@@ -489,6 +573,84 @@ fn btih_of(magnet: &str) -> Option<String> {
     })
 }
 
+/// 从 .torrent 字节提取 BT infohash（40 hex 小写）= SHA1(info dict 原始字节)。
+/// 只做最小 bencode 定位（顶层 dict 找键 `info` → 配对结束 `e` 取整段），
+/// 不做完整解析——足以支撑 canonical 查重。
+#[cfg(feature = "bt")]
+pub fn torrent_infohash(b: &[u8]) -> Option<String> {
+    use sha1::Digest;
+    if b.first() != Some(&b'd') {
+        return None;
+    }
+    let mut i = 1; // 顶层 dict 键值对扫描
+    while i < b.len() {
+        let (key, after_key) = be_str(b, i)?;
+        i = after_key;
+        if key == b"info" {
+            if b.get(i) != Some(&b'd') {
+                return None; // info 必须是 dict
+            }
+            let end = dict_skip(b, i)?;
+            let digest = sha1::Sha1::digest(&b[i..=end]);
+            return Some(
+                digest
+                    .iter()
+                    .map(|x| format!("{x:02x}"))
+                    .collect::<String>(),
+            );
+        }
+        // 跳过值（结构感知），继续找 `info`
+        i = value_skip(b, i)?;
+    }
+    None
+}
+
+/// bencode 字符串 `len:data` → (data, 内容后下标)。
+#[cfg(feature = "bt")]
+fn be_str(b: &[u8], at: usize) -> Option<(&[u8], usize)> {
+    let colon = b[at..].iter().position(|&c| c == b':')? + at;
+    let len: usize = std::str::from_utf8(&b[at..colon]).ok()?.parse().ok()?;
+    let start = colon + 1;
+    Some((&b[start..start + len], start + len))
+}
+
+/// dict 结束下标：从 `start`（'d'）按 键(字符串)→值 结构推进到闭合 'e'。
+/// 键位置固定为字符串（len: 数字开头），值可为任意类型——值内的数据字节
+/// （如 pieces 的 20 字节）不会被误当 len: 解析。
+#[cfg(feature = "bt")]
+fn dict_skip(b: &[u8], start: usize) -> Option<usize> {
+    let mut i = start + 1;
+    while b.get(i) != Some(&b'e') {
+        let (_, after) = be_str(b, i)?; // 键：字符串
+        i = value_skip(b, after)?; // 值：任意类型
+    }
+    Some(i)
+}
+
+/// list 结束下标：从 `start`（'l'）按 值* 推进到闭合 'e'。
+#[cfg(feature = "bt")]
+fn list_skip(b: &[u8], start: usize) -> Option<usize> {
+    let mut i = start + 1;
+    while b.get(i) != Some(&b'e') {
+        i = value_skip(b, i)?;
+    }
+    Some(i)
+}
+
+/// 跳过任意 bencode 值（dict/list/int/str），返回其后的下标。
+#[cfg(feature = "bt")]
+fn value_skip(b: &[u8], i: usize) -> Option<usize> {
+    match b.get(i)? {
+        b'd' => dict_skip(b, i).map(|e| e + 1),
+        b'l' => list_skip(b, i).map(|e| e + 1),
+        b'i' => {
+            let e = b[i..].iter().position(|&c| c == b'e')? + i;
+            Some(e + 1)
+        }
+        _ => be_str(b, i).map(|(_, after)| after),
+    }
+}
+
 /// 引擎状态 → 对外任务状态（快照实时化；元数据获取中归入 Downloading）。
 fn engine_state_to_task(st: &EngineState, kind: EngineKind) -> TaskState {
     match st {
@@ -698,5 +860,48 @@ mod bt_alert_tests {
             resume_ready: false,
         };
         assert!(state.apply_bt_alert(&alert).is_none());
+    }
+}
+
+/// torrent_infohash（bencode 最小解析）单元测试。
+#[cfg(all(test, feature = "bt"))]
+mod torrent_tests {
+    use super::torrent_infohash;
+
+    /// 最小合法 .torrent：d4:info<infodict>e
+    fn sample_torrent() -> Vec<u8> {
+        let mut t = b"d4:infod6:lengthi123e4:name4:test12:piece lengthi16384e6:pieces20:".to_vec();
+        t.extend_from_slice(&[0xAB; 20]);
+        t.extend_from_slice(b"ee");
+        t
+    }
+
+    #[test]
+    fn extracts_infohash_from_info_dict() {
+        let ih = torrent_infohash(&sample_torrent()).unwrap();
+        // 预计算：SHA1(info dict) = 7ac2e18f...（info dict = t[7..=86]，80B）
+        assert_eq!(ih, "7ac2e18f65f50b19e6bb1069e15ff2398aac220d");
+    }
+
+    #[test]
+    fn rejects_non_dict_root() {
+        assert!(torrent_infohash(b"nonsense").is_none());
+        assert!(torrent_infohash(b"").is_none());
+    }
+
+    #[test]
+    fn rejects_missing_info_key() {
+        // 合法 bencode dict 但无 info 键
+        let t = b"d3:foo3:bare";
+        assert!(torrent_infohash(t).is_none());
+    }
+
+    #[test]
+    fn skips_values_before_info_key() {
+        // info 前有其他键值（含嵌套 list/int）仍能定位
+        let mut t = b"d5:hello5:world7:payloadli3ee4:info".to_vec();
+        t.extend_from_slice(&sample_torrent()[7..]); // info dict 起点起 + 顶层 e
+        let ih = torrent_infohash(&t).unwrap();
+        assert_eq!(ih, "7ac2e18f65f50b19e6bb1069e15ff2398aac220d");
     }
 }

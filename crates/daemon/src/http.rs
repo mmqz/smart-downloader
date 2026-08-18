@@ -12,15 +12,20 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use base64::Engine as _;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Deserialize)]
 pub struct AddTaskReq {
-    pub url: String,
+    #[serde(default)]
+    pub url: Option<String>,
     #[serde(default)]
     pub dest: Option<String>,
+    /// .torrent 文件内容（标准 base64）。与 `url` 二选一，优先 torrent。
+    #[serde(default)]
+    pub torrent_b64: Option<String>,
 }
 
 /// 组装 API 路由。
@@ -114,7 +119,35 @@ async fn add_task(
     State(state): State<Arc<DaemonState>>,
     Json(req): Json<AddTaskReq>,
 ) -> impl IntoResponse {
-    match state.add_link_task(req.url, req.dest).await {
+    let result = if let Some(b64) = req.torrent_b64 {
+        match base64::engine::general_purpose::STANDARD.decode(b64.as_bytes()) {
+            Ok(bytes) => {
+                #[cfg(feature = "bt")]
+                {
+                    state.add_torrent_task(bytes, req.dest).await
+                }
+                #[cfg(not(feature = "bt"))]
+                {
+                    let _ = bytes;
+                    Err(crate::state::DaemonError::InvalidSource(
+                        ".torrent 需 BT 引擎（编译时启用 --features daemon/bt）".into(),
+                    ))
+                }
+            }
+            Err(_) => Err(crate::state::DaemonError::InvalidSource(
+                "torrent_b64 不是合法 base64".into(),
+            )),
+        }
+    } else {
+        let Some(url) = req.url else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "需要 url 或 torrent_b64" })),
+            );
+        };
+        state.add_link_task(url, req.dest).await
+    };
+    match result {
         Ok(task_id) => (
             StatusCode::CREATED,
             Json(serde_json::json!({ "task_id": task_id })),

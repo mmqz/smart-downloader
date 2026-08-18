@@ -10,6 +10,8 @@ use smart_dl_daemon::http;
 use smart_dl_daemon::state::DaemonState;
 use std::sync::Arc;
 
+use base64::Engine as _;
+
 async fn serve_bt() -> (std::net::SocketAddr, Arc<DaemonState>) {
     let dir = tempfile::tempdir().unwrap();
     let bt = smart_dl_daemon::bt::BtEngine::new(dir.path()).unwrap();
@@ -101,6 +103,86 @@ async fn same_magnet_deduped_409() {
         reqwest::StatusCode::CONFLICT,
         "同 btih 必须判重"
     );
+}
+
+#[tokio::test]
+async fn torrent_file_add_creates_task() {
+    // 最小 .torrent（手写 bencode）→ torrent_b64 上传 → 201 + engine=bt
+    let mut t = b"d4:infod6:lengthi123e4:name4:test12:piece lengthi16384e6:pieces20:".to_vec();
+    t.extend_from_slice(&[0xAB; 20]);
+    t.extend_from_slice(b"ee");
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&t);
+
+    let (addr, state) = serve_bt().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{base}/tasks"))
+        .json(&serde_json::json!({ "torrent_b64": b64 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::CREATED,
+        ".torrent 应 201"
+    );
+    let tid = resp.json::<serde_json::Value>().await.unwrap()["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let snap: serde_json::Value = client
+        .get(format!("{base}/tasks/{tid}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(snap["engine"], "bt", "torrent 任务必须走 BT 引擎");
+    assert!(
+        snap["source"].as_str().unwrap().contains("TorrentFile"),
+        "source 应标注 TorrentFile"
+    );
+
+    // 同一 .torrent 重复 → 409（infohash canonical 查重）
+    let dup = client
+        .post(format!("{base}/tasks"))
+        .json(&serde_json::json!({ "torrent_b64": b64 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        dup.status(),
+        reqwest::StatusCode::CONFLICT,
+        "同 infohash 必须判重"
+    );
+
+    // 事件已发布（TaskCreated）
+    let drained = state.hub().drain();
+    let events: Vec<&smart_dl_daemon::events::SchedulerEvent> =
+        drained.iter().map(|e| &e.event).collect();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        smart_dl_daemon::events::SchedulerEvent::TaskCreated { .. }
+    )));
+}
+
+#[tokio::test]
+async fn invalid_base64_rejected() {
+    let (addr, _state) = serve_bt().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{base}/tasks"))
+        .json(&serde_json::json!({ "torrent_b64": "!!!not-base64!!!" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
