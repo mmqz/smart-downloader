@@ -24,6 +24,7 @@
 |---|---|
 | ~代理支持~ | ~~无（HTTP/BT 均无代理配置项）~~ **已完成**：HTTP（reqwest Proxy）+ BT（lt_apply_network）双引擎接线，启动时生效（见 3fac8e3）|
 | ~引擎层限速~ | ~~无（BT 的 libtorrent 速率上限未接线；HTTP 无限速）~~ **已完成**：全局下载/上传限速（KiB/s；0=不限），HTTP 跨段共享 RateLimiter（见 3fac8e3）|
+| ~云兜底调度接线~ | ~~FallbackCoordinator（M2 设计）仅在 provider crate 测试里使用，daemon 无调度入口~~ **已完成（M6）**：`POST /tasks/:id/fallback` 手动兜底——BT 任务暂停且进度 <50% → 选 provider → 直链 → HttpEngine 传输 → 任务 Completed；`[provider]` 配置段（mock 占位，真实 provider 待迅雷线落地）|
 | magnet 无 tracker 冷启 | BT 会话 DHT/LSD/UPnP/NAT-PMP 全关（M0 确定性）→ 纯 magnet 无 tracker 找不到 peer（只有直连/手动 peer 可用）；真实场景需按需开启 DHT/LSD——**远期**（改 lt_kernel 会话参数）|
 | ed2k 协议 | 明确不支持（解码出的 ed2k 链接 → 路由拒绝，报"ed2k 不支持"）——**挪远期**：完整实现 = eMule/eDonkey 客户端协议（数周级），并入"跨协议"远期专项（见 F 段）|
 
@@ -62,3 +63,4 @@
 
 - Kaspersky 锁 daemon lib 单测 exe → 只能用集成测试（`--test X`）
 - bt_api 并行偶发 flaky（libtorrent 多 session 并行）→ 重跑即绿
+- http_api **rebuild 后首次运行偶发 1 用例超时失败**（Kaspersky 扫描新编译 exe 的停顿击穿 10s 轮询超时；同二进制后续运行全部稳定——已实测 44+ 连绿）→ 重跑即绿
