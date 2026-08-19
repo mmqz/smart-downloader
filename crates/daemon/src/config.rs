@@ -1,6 +1,6 @@
-//! serve 配置（TOML）：HTTP 监听地址 / 默认下载目录 / BT 引擎开关 / 单实例锁路径。
-//! 文件缺失时使用默认值（Config::default）；`--config <path>` 覆盖。
-
+/// serve 配置（TOML）：HTTP 监听地址 / 默认下载目录 / BT 引擎开关 / 单实例锁路径 /
+/// 云兜底 Provider / 任务持久化。
+/// 文件缺失时使用默认值（Config::default）；`--config <path>` 覆盖。
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -10,6 +10,7 @@ pub struct Config {
     pub server: ServerCfg,
     pub download: DownloadCfg,
     pub bt: BtCfg,
+    pub provider: ProviderCfg,
     pub lock: LockCfg,
     pub storage: StorageCfg,
 }
@@ -47,6 +48,17 @@ pub struct BtCfg {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
+pub struct ProviderCfg {
+    /// 云兜底总开关（`POST /tasks/:id/fallback` 需要 ≥1 个可用 provider）。
+    /// 默认关：不自动烧配额；显式开启才注入 provider 列表。
+    pub enabled: bool,
+    /// 开发/演示用 MockProvider（仅有的现成实现；真实 provider 待迅雷线落地）。
+    /// 仅当 `enabled=true` 时生效。
+    pub mock: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 pub struct LockCfg {
     /// 单实例锁文件路径（重复启动 → 拒绝）。
     pub path: PathBuf,
@@ -74,6 +86,10 @@ impl Default for Config {
                 enabled: true,
                 save_path: None,
                 max_upload_kb_s: 0,
+            },
+            provider: ProviderCfg {
+                enabled: false,
+                mock: false,
             },
             lock: LockCfg {
                 path: PathBuf::from("./daemon.lock"),
@@ -115,6 +131,7 @@ impl Config {
             "max_download_kb_s": self.download.max_download_kb_s,
             "max_upload_kb_s": self.bt.max_upload_kb_s,
             "proxy_enabled": !self.download.proxy.is_empty(),
+            "provider_enabled": self.provider.enabled,
         })
     }
 }
@@ -153,6 +170,10 @@ enabled = false
 save_path = "/data/bt"
 max_upload_kb_s = 512
 
+[provider]
+enabled = true
+mock = true
+
 [lock]
 path = "/tmp/sd.lock"
 "#,
@@ -166,12 +187,15 @@ path = "/tmp/sd.lock"
         assert!(!c.bt.enabled);
         assert_eq!(c.bt_save_path(), PathBuf::from("/data/bt"));
         assert_eq!(c.bt.max_upload_kb_s, 512);
+        assert!(c.provider.enabled);
+        assert!(c.provider.mock);
         assert_eq!(c.lock.path, PathBuf::from("/tmp/sd.lock"));
-        // 快照：含限速、代理仅暴露开关（不泄露凭据）
+        // 快照：含限速、代理仅暴露开关（不泄露凭据）、provider 开关
         let snap = c.snapshot_json(&PathBuf::from("/tmp/tasks.json"));
         assert_eq!(snap["max_download_kb_s"], 2048);
         assert_eq!(snap["max_upload_kb_s"], 512);
         assert!(snap["proxy_enabled"].as_bool().unwrap());
+        assert!(snap["provider_enabled"].as_bool().unwrap());
         assert!(
             !snap.as_object().unwrap().contains_key("proxy"),
             "快照不得含代理 URL"

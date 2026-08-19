@@ -365,8 +365,8 @@ async fn task_logs_returns_add_event() {
 }
 
 #[tokio::test]
-async fn fallback_returns_501_not_implemented() {
-    // Q-B9 兜底未接入引擎 → 服务端权威 501（错误来自 daemon 而非 CLI 硬编码）
+async fn fallback_on_missing_task_returns_404() {
+    // M6 已接线：不存在的任务 → 404（不再 501）
     let (addr, _state) = serve().await;
     let base = format!("http://{addr}");
     let resp = reqwest::Client::new()
@@ -376,13 +376,43 @@ async fn fallback_returns_501_not_implemented() {
         .unwrap();
     assert_eq!(
         resp.status(),
-        reqwest::StatusCode::NOT_IMPLEMENTED,
-        "fallback v1 未实现必须 501"
+        reqwest::StatusCode::NOT_FOUND,
+        "fallback 不存在任务应 404"
     );
     let body: serde_json::Value = resp.json().await.unwrap();
     assert!(
-        body["error"].as_str().unwrap().contains("fallback"),
-        "错误信息应含 fallback: {body}"
+        body["error"].as_str().unwrap().contains("not found"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn fallback_on_http_task_is_rejected() {
+    // M6：兜底仅面向 BT 任务（HTTP 任务直接拒绝）
+    let body = patterned(8 * 1024);
+    let srv = TestServer::start(body).await;
+    let (addr, _state) = serve().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let resp = add_task(&client, &base, &srv.url()).await;
+    assert_eq!(resp.0, reqwest::StatusCode::CREATED);
+    let tid = resp.1["task_id"].as_str().unwrap().to_string();
+
+    let fr = client
+        .post(format!("{base}/tasks/{tid}/fallback"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        fr.status(),
+        reqwest::StatusCode::CONFLICT,
+        "HTTP 任务兜底应 409"
+    );
+    let fb: serde_json::Value = fr.json().await.unwrap();
+    assert!(
+        fb["error"].as_str().unwrap().contains("仅 BT 任务"),
+        "错误应说明只支持 BT: {fb}"
     );
 }
 

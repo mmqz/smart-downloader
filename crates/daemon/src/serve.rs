@@ -49,12 +49,19 @@ pub async fn run(cfg: Config, cfg_path: Option<PathBuf>) -> Result<(), ServeErro
     let http_engine: Arc<dyn smart_dl_core::types::DownloadEngine> = Arc::new(
         smart_dl_httpdl::HttpEngine::new_limited(client, cfg.download.max_download_kb_s),
     );
+    // 3b. 云兜底 provider 列表（`[provider]` 配置；仅 MockProvider 现成实现——
+    // 开发/演示占位，真实 provider（迅雷云盘等）落地后按类型构造）
+    let mut providers: Vec<Arc<dyn smart_dl_provider::RemoteProvider>> = Vec::new();
+    if cfg.provider.enabled && cfg.provider.mock {
+        providers.push(Arc::new(smart_dl_provider::MockProvider::new("mock")));
+        tracing::info!("云兜底已启用（provider=mock，开发占位）");
+    }
     #[cfg(feature = "bt")]
     let mut state =
-        DaemonState::new(http_engine, vec![]).with_dest_root(cfg.download.dest_root.clone());
+        DaemonState::new(http_engine, providers).with_dest_root(cfg.download.dest_root.clone());
     #[cfg(not(feature = "bt"))]
     let mut state =
-        DaemonState::new(http_engine, vec![]).with_dest_root(cfg.download.dest_root.clone());
+        DaemonState::new(http_engine, providers).with_dest_root(cfg.download.dest_root.clone());
 
     // 4. BT 引擎（先取 core 句柄，供 alert 事件流）
     #[cfg(feature = "bt")]

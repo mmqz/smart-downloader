@@ -8,7 +8,10 @@ use smart_dl_core::task::{DownloadTask, TaskId, TaskMetadata};
 use smart_dl_core::types::{
     DownloadEngine, DownloadSource, EngineKind, EngineState, EngineStatus, EngineTaskId,
 };
-use smart_dl_provider::{ProviderRuntime, RemoteProvider};
+use smart_dl_provider::{
+    FallbackCoordinator, FallbackOutcome, HttpSink, ProviderError, ProviderRuntime, RemoteProvider,
+    SinkError,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -116,6 +119,8 @@ pub enum DaemonError {
     InvalidSource(String),
     #[error("持久化: {0}")]
     Persist(String),
+    #[error("云兜底: {0}")]
+    Fallback(String),
 }
 
 /// 守护进程状态：任务 + 引擎表 + 事件中枢。
@@ -328,7 +333,14 @@ impl DaemonState {
         dest_root: Option<String>,
     ) -> Result<TaskId, DaemonError> {
         // B10：目标目录预检（创建/可写）；magnet 总大小元数据前未知 → 空间预检跳过
-        let dest_root = ensure_dest_root(dest_root)?;
+        // dest 未指定 → 默认落盘目录（与 HTTP 一致：default_dest_root 配置）
+        let def = self
+            .default_dest_root
+            .lock()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let dest_root = ensure_dest_root(dest_root.or(Some(def)))?;
         let canonical = CanonicalId {
             kind: CanonicalKind::Bt,
             identity: btih_of(&magnet).unwrap_or_else(|| magnet.clone()),
@@ -407,8 +419,14 @@ impl DaemonState {
         torrent_bytes: Vec<u8>,
         dest_root: Option<String>,
     ) -> Result<TaskId, DaemonError> {
-        // B10：目标目录预检（创建/可写）
-        let dest_root = ensure_dest_root(dest_root)?;
+        // B10：目标目录预检（创建/可写）；dest 未指定 → 默认落盘目录（与 HTTP/BT-magnet 一致）
+        let def = self
+            .default_dest_root
+            .lock()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let dest_root = ensure_dest_root(dest_root.or(Some(def)))?;
         let Some(ih) = torrent_infohash(&torrent_bytes) else {
             return Err(DaemonError::InvalidSource(
                 ".torrent 解析失败：无法定位 info dict".into(),
@@ -639,6 +657,7 @@ impl DaemonState {
             .map_err(|e| DaemonError::Engine(e.to_string()))?;
         if let Some(rec) = self.tasks.lock().unwrap().get_mut(id) {
             rec.push_event("pause", None);
+            rec.task.state = TaskState::Paused; // 记录缓存同步（alert 流不迁移 pause）
         }
         self.hub.publish(SchedulerEvent::StateChanged {
             task_id: id.to_string(),
@@ -666,6 +685,7 @@ impl DaemonState {
             .map_err(|e| DaemonError::Engine(e.to_string()))?;
         if let Some(rec) = self.tasks.lock().unwrap().get_mut(id) {
             rec.push_event("resume", None);
+            rec.task.state = TaskState::Downloading(rec.engine_kind);
         }
         self.hub.publish(SchedulerEvent::StateChanged {
             task_id: id.to_string(),
@@ -697,6 +717,89 @@ impl DaemonState {
             .iter()
             .map(|p| (p.name().to_string(), p.runtime()))
             .collect()
+    }
+
+    /// Q-B9 手动兜底（M6 接线）：BT 任务 → 云 Provider → 直链 → HTTP 引擎传输。
+    /// 前置（FallbackPolicy 默认冻结）：任务须为 BT 且已暂停；BT 进度 < 50%。
+    /// 成功 → 任务置 Completed + 事件广播 + 落盘。
+    pub async fn fallback(&self, id: &str) -> Result<FallbackOutcome, DaemonError> {
+        // 1. 任务存在性 + 必须是 BT
+        let rec = self
+            .tasks
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| DaemonError::NotFound(id.to_string()))?;
+        if rec.engine_kind != EngineKind::Bt {
+            return Err(DaemonError::Fallback(format!(
+                "仅 BT 任务支持云兜底（{} 为 {:?}）",
+                id, rec.engine_kind
+            )));
+        }
+        // 2. 串行策略（默认禁双份占盘）→ 必须先暂停
+        if rec.task.state != TaskState::Paused {
+            return Err(DaemonError::Fallback(format!(
+                "需先暂停 BT 任务 {id}（串行兜底策略：禁 BT/直链双份占盘）"
+            )));
+        }
+        // 3. BT 进度（metadata 未到 → total=0 → 进度 0，允许兜底）；≥50% 拒绝
+        let bt_progress = match (&rec.engine_tid, self.engine_for(EngineKind::Bt).ok()) {
+            (Some(tid), Some(engine)) => engine
+                .status(tid)
+                .await
+                .ok()
+                .map(|s| {
+                    if s.total == 0 {
+                        0.0
+                    } else {
+                        s.total_done as f64 / s.total as f64
+                    }
+                })
+                .unwrap_or(0.0),
+            _ => 0.0,
+        };
+        // 4. 协商器 + 传输 sink → 执行兜底
+        if self.providers.is_empty() {
+            return Err(DaemonError::Fallback(
+                "无可用 provider（未配置或全部不可用）".into(),
+            ));
+        }
+        let coord = FallbackCoordinator::new(
+            self.providers.clone(),
+            smart_dl_core::ownership::FallbackPolicy::default(),
+        );
+        let http = self
+            .engine_for(EngineKind::Http)
+            .map_err(|e| DaemonError::Engine(e.to_string()))?;
+        let sink = FallbackSink { http };
+        let outcome = coord
+            .begin_fallback(&rec.task, bt_progress, true, &sink)
+            .await
+            .map_err(map_provider_err)?;
+        // 4b. BT 引擎任务退役（直链已替代 BT 传输，keep data）：
+        // 快照不再读引擎实时下载态 → 回落到记录态 Completed
+        if let (Some(tid), Ok(bt)) = (&rec.engine_tid, self.engine_for(EngineKind::Bt)) {
+            let _ = bt.remove(tid, false).await;
+        }
+        // 5. 成功：置 Completed + 事件 + 落盘
+        {
+            let mut tasks = self.tasks.lock().unwrap();
+            if let Some(r) = tasks.get_mut(id) {
+                r.push_event("fallback", Some(format!("provider={}", outcome.provider)));
+                r.task.state = TaskState::Completed;
+            }
+        }
+        self.autosave();
+        self.hub.publish(SchedulerEvent::StateChanged {
+            task_id: id.to_string(),
+            from: TaskState::Downloading(EngineKind::Bt),
+            to: TaskState::Completed,
+        });
+        self.hub.publish(SchedulerEvent::Completed {
+            task_id: id.to_string(),
+        });
+        Ok(outcome)
     }
 
     /// 任务操作日志（`GET /tasks/:id/logs`）：快照 + 事件序列。
@@ -739,6 +842,109 @@ impl DaemonState {
             *self.config_snapshot.lock().unwrap() = Some(snap);
         }
     }
+}
+
+/// 兜底传输 sink：HTTP 引擎承接 provider 直链下载（M5 直链 → HttpEngine）。
+/// 每个文件建引擎任务 → 轮询到终态 → 移除引擎任务（不留记录，属于父 BT 任务流程）。
+struct FallbackSink {
+    http: Arc<dyn DownloadEngine>,
+}
+
+#[async_trait::async_trait]
+impl HttpSink for FallbackSink {
+    async fn transfer(
+        &self,
+        task_id: &str,
+        url: &str,
+        dest_root: std::path::PathBuf,
+        name: Option<String>,
+    ) -> Result<(), SinkError> {
+        // 目标父目录（rel_path 可能含子目录）
+        if let Some(rel) = &name {
+            if let Some(parent) = dest_root.join(rel).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
+        let task = DownloadTask {
+            id: task_id.to_string(),
+            canonical_id: CanonicalId {
+                kind: CanonicalKind::Http,
+                identity: url.to_string(),
+                validator: None,
+                token_sensitive: false,
+            },
+            source: DownloadSource::Http {
+                url: url.to_string(),
+                headers: vec![],
+                auth: None,
+            },
+            identity: ContentIdentity::SingleFile {
+                size: 0,
+                etag: None,
+                sha256: None,
+            },
+            dest_root,
+            files: vec![],
+            acquisitions: vec![],
+            aggregate: Default::default(),
+            state: TaskState::Queued,
+            retry: Default::default(),
+            created_at: std::time::Instant::now(),
+            metadata: TaskMetadata {
+                name,
+                added_at_unix: 0,
+            },
+        };
+        let tid = self
+            .http
+            .add(&task)
+            .await
+            .map_err(|e| SinkError::Failed(e.to_string()))?;
+        // 轮询到终态（60s 上限）
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let result = loop {
+            let st = self
+                .http
+                .status(&tid)
+                .await
+                .map_err(|e| SinkError::Failed(e.to_string()))?;
+            match st.state {
+                EngineState::Completed => break Ok(()),
+                EngineState::Error => {
+                    break Err(SinkError::Failed(
+                        st.error.unwrap_or_else(|| "engine error".into()),
+                    ))
+                }
+                _ => {
+                    if std::time::Instant::now() >= deadline {
+                        break Err(SinkError::Failed("直链传输超时(60s)".into()));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+        };
+        let _ = self.http.remove(&tid, false).await;
+        result
+    }
+
+    async fn update_sources(&self, _task_id: &str, _urls: Vec<String>) -> Result<(), SinkError> {
+        // v1：直链不续期（真实 provider 的 refresh_links 接入后实现）
+        Ok(())
+    }
+}
+
+/// ProviderError → DaemonError 的人类可读映射。
+fn map_provider_err(e: ProviderError) -> DaemonError {
+    use ProviderError as P;
+    let msg = match e {
+        P::ManualOnly => "BT 进度 ≥50%，按兜底策略不允许（仅进度 <50% 可兜底）".to_string(),
+        P::RequiresPause => "需先暂停 BT 任务（串行兜底策略）".to_string(),
+        P::NoProvider => "无可用 provider（未配置/未认证/配额耗尽/冷却中/并发满）".to_string(),
+        P::Expired => "直链已过期且刷新/重提交均失败".to_string(),
+        P::RetriesExhausted => "直链过期恢复次数超限（update_sources≤3 + resubmit≤2）".to_string(),
+        other => other.to_string(),
+    };
+    DaemonError::Fallback(msg)
 }
 
 /// B10（§12 D36）：dest_root 预检——缺失目录自动创建 + 可写探测（探针文件）。

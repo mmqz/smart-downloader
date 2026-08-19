@@ -1,6 +1,6 @@
 //! HTTP API（axum，M6）：任务 CRUD + 快照 + Provider 运行态 + WS 升级端点（M7）。
 
-use crate::state::DaemonState;
+use crate::state::{DaemonError, DaemonState};
 use crate::ws::Throttler;
 use axum::{
     extract::{
@@ -58,16 +58,30 @@ async fn task_logs(
     }
 }
 
-/// `POST /tasks/:id/fallback`：Q-B9 手动兜底——v1 未接入引擎侧兜底，明确 501。
+/// `POST /tasks/:id/fallback`：Q-B9 手动兜底（M6 已接线）——BT 任务暂停且进度 <50%
+/// → 云 Provider 直链 → HTTP 引擎传输 → 任务置 Completed。
 async fn task_fallback(
-    State(_state): State<Arc<DaemonState>>,
+    State(state): State<Arc<DaemonState>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({ "error": format!("Q-B9 fallback 未实现（v1 无引擎侧兜底）: {id}") })),
-    )
-        .into_response()
+    match state.fallback(&id).await {
+        Ok(outcome) => Json(serde_json::json!({
+            "status": "completed",
+            "provider": outcome.provider,
+            "provider_task": outcome.provider_task,
+            "transferred": outcome.transferred,
+        }))
+        .into_response(),
+        Err(e) => {
+            let body = Json(serde_json::json!({ "error": e.to_string() }));
+            let status = match e {
+                DaemonError::NotFound(_) => StatusCode::NOT_FOUND,
+                DaemonError::Fallback(_) => StatusCode::CONFLICT,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, body).into_response()
+        }
+    }
 }
 
 /// `GET /config`：生效配置快照（serve 注入；未注入时提示）。
