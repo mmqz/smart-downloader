@@ -418,7 +418,7 @@ async fn fallback_on_http_task_is_rejected() {
 
 /// 等任务快照 state（引擎状态映射）到目标值（最长 10s）。
 async fn wait_snapshot_state(state: &Arc<DaemonState>, id: &str, want: &str) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         if let Some(s) = state.task_snapshot(id).await {
             if s.state == want {
@@ -427,7 +427,7 @@ async fn wait_snapshot_state(state: &Arc<DaemonState>, id: &str, want: &str) {
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "10s 内未到 {want}: {id}"
+            "60s 内未到 {want}: {id}"
         );
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
@@ -435,7 +435,7 @@ async fn wait_snapshot_state(state: &Arc<DaemonState>, id: &str, want: &str) {
 
 /// 等 list（记录 state——HTTP 状态推进循环写入）到目标值（最长 10s）。
 async fn wait_list_state(client: &reqwest::Client, base: &str, id: &str, want: &str) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let list: Vec<serde_json::Value> = client
             .get(format!("{base}/tasks"))
@@ -452,7 +452,7 @@ async fn wait_list_state(client: &reqwest::Client, base: &str, id: &str, want: &
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "10s 内 list 未到 {want}: {id}"
+            "60s 内 list 未到 {want}: {id}"
         );
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
@@ -463,13 +463,13 @@ async fn wait_event(
     state: &Arc<DaemonState>,
     want: impl Fn(&SchedulerEvent) -> bool,
 ) -> Vec<smart_dl_daemon::events::Envelope> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let drained = state.hub().drain();
         if drained.iter().any(|e| want(&e.event)) {
             return drained;
         }
-        assert!(std::time::Instant::now() < deadline, "10s 内未等到目标事件");
+        assert!(std::time::Instant::now() < deadline, "60s 内未等到目标事件");
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 }

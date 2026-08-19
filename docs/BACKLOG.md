@@ -63,4 +63,4 @@
 
 - Kaspersky 锁 daemon lib 单测 exe → 只能用集成测试（`--test X`）
 - bt_api 并行偶发 flaky（libtorrent 多 session 并行）→ 重跑即绿
-- http_api **rebuild 后首次运行偶发 1 用例超时失败**（Kaspersky 扫描新编译 exe 的停顿击穿 10s 轮询超时；同二进制后续运行全部稳定——已实测 44+ 连绿）→ 重跑即绿
+- http_api 曾偶发 1 用例失败：重负载窗口（连续重建 + 杀软扫描新 exe）把轮询测试的 10s 等待击穿。**已修复**：三处等待护栏 10s→60s（快照/list/事件；语义不变，仅抗进程级停顿；已实测 6 轮强制 rebuild 首跑 + 50+ 次运行全绿）
