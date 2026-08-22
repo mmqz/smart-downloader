@@ -13,6 +13,7 @@ pub mod state_machine;
 pub mod task;
 pub mod types;
 pub mod bencode;
+pub mod xltd;
 
 pub use dedup::{DedupIndex, DedupOutcome};
 pub use heat::{heat_level, heat_score, HeatEvaluator, HeatLevel};
