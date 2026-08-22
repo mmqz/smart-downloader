@@ -1,6 +1,9 @@
 //! 迅雷云盘签名算法（captcha_sign / device_sign），纯函数。
 
-use md5::{Digest, Md5};
+#![allow(unused_imports)]
+
+use md5::{Digest as Md5Digest, Md5};
+use sha1::{Digest as Sha1Digest, Sha1};
 
 /// 手写 hex 编码（避免引入 hex crate）。
 fn to_hex(bytes: &[u8]) -> String {
@@ -28,6 +31,8 @@ const ALGORITHMS: [&str; 10] = [
 const CLIENT_ID: &str = "Xp6vsxz_7IYVw2BB";
 const CLIENT_VERSION: &str = "8.31.0.9726";
 const PACKAGE_NAME: &str = "com.xunlei.downloadprovider";
+const APPID: &str = "40";
+const APPKEY: &str = "34a062aaa22f906fca4fefe9fb3a3021";
 
 /// 计算 captcha_sign：
 ///   s = ClientID + ClientVersion + PackageName + DeviceID + timestamp
@@ -45,6 +50,22 @@ pub fn captcha_sign(device_id: &str, timestamp_millis: &str) -> String {
         s = to_hex(&h.finalize());
     }
     format!("1.{}", s)
+}
+
+/// device_sign = "div101." + deviceID + md5_hex(sha1_hex(deviceID+packageName+APPID+APPKey))
+pub fn device_sign(device_id: &str) -> String {
+    let base = format!("{}{}{}{}", device_id, PACKAGE_NAME, APPID, APPKEY);
+    let sha1_hex = {
+        let mut h = Sha1::new();
+        h.update(base.as_bytes());
+        to_hex(&h.finalize())
+    };
+    let md5_hex = {
+        let mut h = Md5::new();
+        h.update(sha1_hex.as_bytes());
+        to_hex(&h.finalize())
+    };
+    format!("div101.{}{}", device_id, md5_hex)
 }
 
 #[cfg(test)]
@@ -82,5 +103,21 @@ mod tests {
         let a = captcha_sign("dev", "1000");
         let b = captcha_sign("dev", "1001");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn device_sign_has_div101_prefix() {
+        let s = device_sign("device123");
+        assert!(s.starts_with("div101.device123"));
+    }
+
+    #[test]
+    fn device_sign_is_deterministic() {
+        assert_eq!(device_sign("dev"), device_sign("dev"));
+    }
+
+    #[test]
+    fn device_sign_differs_by_device() {
+        assert_ne!(device_sign("a"), device_sign("b"));
     }
 }
