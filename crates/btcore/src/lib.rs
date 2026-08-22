@@ -11,6 +11,7 @@ pub mod bare;
 pub mod engine;
 pub mod ffi;
 pub mod resume;
+pub mod xudt;
 
 pub use alerts::{Alert, AlertKind, StateSubKind};
 pub use bare::Bare;
