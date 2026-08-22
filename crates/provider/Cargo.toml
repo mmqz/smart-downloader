@@ -10,6 +10,8 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 smart-dl-core = { path = "../core" }
+md-5 = "0.10"
+sha1 = { workspace = true }
 
 [dev-dependencies]
 axum = "0.7"

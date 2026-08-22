@@ -7,6 +7,7 @@
 pub mod coordinator;
 pub mod mock;
 pub mod types;
+pub mod xunlei;
 
 pub use coordinator::{FallbackCoordinator, FallbackOutcome, HttpSink, SinkError};
 pub use mock::MockProvider;
