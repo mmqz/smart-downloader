@@ -30,6 +30,22 @@ pub fn gcid(data: &[u8]) -> String {
     to_hex(&hash1.finalize())
 }
 
+/// CID (=DCID)：文件 <60KB → SHA1(全文)；否则 SHA1(头20KB || 1/3处20KB || 尾20KB)。
+pub fn cid(data: &[u8]) -> String {
+    if data.len() < 60 * 1024 {
+        return to_hex(&Sha1::digest(data));
+    }
+    let head = &data[0..20 * 1024];
+    let mid_start = data.len() / 3;
+    let mid = &data[mid_start..mid_start + 20 * 1024];
+    let tail = &data[data.len() - 20 * 1024..];
+    let mut h = Sha1::new();
+    h.update(head);
+    h.update(mid);
+    h.update(tail);
+    to_hex(&h.finalize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +80,28 @@ mod tests {
             gcid(&[]),
             "da39a3ee5e6b4b0d3255bfef95601890afd80709"
         );
+    }
+
+    #[test]
+    fn cid_small_file_is_full_sha1() {
+        let data = vec![0x11u8; 1000];
+        assert_eq!(cid(&data), to_hex(&Sha1::digest(&data)));
+    }
+
+    #[test]
+    fn cid_large_file_samples_three_regions() {
+        let data = vec![0x22u8; 100 * 1024];
+        let c = cid(&data);
+        assert_eq!(c.len(), 40);
+
+        let head = &data[0..20 * 1024];
+        let mid_start = data.len() / 3;
+        let mid = &data[mid_start..mid_start + 20 * 1024];
+        let tail = &data[data.len() - 20 * 1024..];
+        let mut h = Sha1::new();
+        h.update(head);
+        h.update(mid);
+        h.update(tail);
+        assert_eq!(c, to_hex(&h.finalize()));
     }
 }
