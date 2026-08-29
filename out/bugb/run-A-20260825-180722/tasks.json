@@ -1,0 +1,40 @@
+[
+  {
+    "task": {
+      "id": "t1",
+      "canonical_id": {
+        "kind": "Bt",
+        "identity": "magnet:?xt=urn:btih:a6453589c479ace6613048fb3c607a77495a3f7c",
+        "validator": null,
+        "token_sensitive": false
+      },
+      "source": {
+        "Magnet": "magnet:?xt=urn:btih:a6453589c479ace6613048fb3c607a77495a3f7c"
+      },
+      "identity": {
+        "SingleFile": {
+          "size": 0,
+          "etag": null,
+          "sha256": null
+        }
+      },
+      "dest_root": "E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-180722/downloads",
+      "files": [],
+      "acquisitions": [],
+      "aggregate": {
+        "done": 0,
+        "total": 0
+      },
+      "state": "Queued",
+      "retry": {
+        "retries": 0,
+        "max_retries": 0
+      },
+      "metadata": {
+        "name": null,
+        "added_at_unix": 0
+      }
+    },
+    "engine_kind": "Bt"
+  }
+]

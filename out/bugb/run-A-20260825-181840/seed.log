@@ -1,0 +1,9 @@
+SEED magnet:?xt=urn:btih:a6453589c479ace6613048fb3c607a77495a3f7c PORT 17177
+SEED-STATUS: peers=0 seeds=0 progress=1.0000 state=5
+SEED-ALERT: 4bab34 torrent finished downloading
+SEED-STATUS: peers=0 seeds=0 progress=1.0000 state=5
+SEED-STATUS: peers=0 seeds=0 progress=1.0000 state=5
+SEED-ALERT: 4bab34 peer 127.0.0.1:60882 incoming connection to peer (TCP)
+SEED-STATUS: peers=0 seeds=0 progress=1.0000 state=5
+SEED-STATUS: peers=0 seeds=0 progress=1.0000 state=5
+SEED-STATUS: peers=0 seeds=0 progress=1.0000 state=5

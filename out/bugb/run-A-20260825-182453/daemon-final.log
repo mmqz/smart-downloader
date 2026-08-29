@@ -1,0 +1,16 @@
+2026-08-25T10:24:54.490783Z  INFO smart_dl_daemon::serve: 单实例锁已持有: "E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-182453/daemon.lock"
+2026-08-25T10:24:54.512901Z  INFO smart_dl_daemon::serve: [bugb] mock provider 注入直链: http://127.0.0.1:20716/mockfile.bin
+2026-08-25T10:24:54.530184Z  INFO smart_dl_daemon::serve: [bugb] mock provider 延迟 Ready: 240s
+2026-08-25T10:24:54.557301Z  INFO smart_dl_daemon::serve: 云兜底已启用（provider=mock，开发占位）
+2026-08-25T10:24:54.619227Z  INFO smart_dl_daemon::serve: BT 引擎已启用, 落盘: "E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-182453/downloads"
+2026-08-25T10:24:54.623273Z  INFO smart_dl_daemon::serve: smart-dl-daemon 监听 127.0.0.1:19415
+2026-08-25T10:24:55.014040Z  INFO smart_dl_daemon::bt: [bugb] bt add 注入直连 peer 127.0.0.1:17290 ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:24:55.123890Z  INFO smart_dl_daemon::bt_events: [bugb] alert-loop alive ticks=1 batch=0
+2026-08-25T10:24:55.343585Z  INFO smart_dl_daemon::bt: [bugb] bt::pause enter ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:24:55.344726Z  INFO smart_dl_daemon::bt: [bugb] fastresume request ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:24:55.345412Z  INFO smart_dl_daemon::bt: [bugb] fastresume ready ih=a6453589c479ace6613048fb3c607a77495a3f7c elapsed_ms=0
+2026-08-25T10:24:55.346574Z  INFO smart_dl_daemon::bt: [bugb] bt::pause exit ih=a6453589c479ace6613048fb3c607a77495a3f7c elapsed_ms=3
+2026-08-25T10:24:56.091080Z  INFO smart_dl_daemon::state: [bugb] fallback enter id=t1
+2026-08-25T10:24:56.105172Z  INFO smart_dl_daemon::state: [bugb] fallback gate-passed id=t1 bt_progress=1.0000 → begin_fallback (14ms)
+2026-08-25T10:24:56.152283Z  INFO smart_dl_daemon::bt_events: [bugb] alert-loop batch=77 first_kind=Some(Peer)
+2026-08-25T10:24:56.628209Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=2004

@@ -1,0 +1,9 @@
+2026-08-25T10:26:49.943453Z  INFO smart_dl_daemon::serve: 单实例锁已持有: "E:/Code/ai/smart-downloader/out/bugb/run-B-20260825-182648/daemon.lock"
+2026-08-25T10:26:50.029173Z  INFO smart_dl_daemon::serve: [bugb] mock provider 注入直链: http://127.0.0.1:19484/mockfile.bin
+2026-08-25T10:26:50.048130Z  INFO smart_dl_daemon::serve: [bugb] mock provider 延迟 Ready: 10s
+2026-08-25T10:26:50.065589Z  INFO smart_dl_daemon::serve: 云兜底已启用（provider=mock，开发占位）
+2026-08-25T10:26:50.123199Z  INFO smart_dl_daemon::serve: BT 引擎已启用, 落盘: "E:/Code/ai/smart-downloader/out/bugb/run-B-20260825-182648/downloads"
+2026-08-25T10:26:50.126681Z  INFO smart_dl_daemon::serve: smart-dl-daemon 监听 127.0.0.1:19380
+2026-08-25T10:26:50.454041Z  INFO smart_dl_daemon::bt: [bugb] bt add 注入直连 peer 127.0.0.1:16984 ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:26:50.628469Z  INFO smart_dl_daemon::bt_events: [bugb] alert-loop alive ticks=1 batch=0
+2026-08-25T10:26:51.649958Z  INFO smart_dl_daemon::bt_events: [bugb] alert-loop batch=80 first_kind=Some(Peer)

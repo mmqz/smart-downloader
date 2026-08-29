@@ -1,0 +1,70 @@
+tag=B wedged=True rounds=3 apiPort=18420 daemonPid=22728
+threads=24
+ 16 x Wait/Unknown
+  5 x Wait/EventPairLow
+  3 x Wait/UserRequest
+minidump FAILED: This command cannot be run due to the error: An error occurred trying to start process 'C:\WINDOWS\system32\rundll32.exe' with working directory 'E:\Code\ai\smart-downloader'. 拒绝访问。
+final snap: null
+--- watchdog tail ---
+--- fallback job ---
+--- timeline tail ---
+2026-08-25T10:36:16.909134Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=50669 tasks_free=false
+2026-08-25T10:36:17.210650Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=50971 tasks_free=false
+2026-08-25T10:36:17.512084Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=51272 tasks_free=false
+2026-08-25T10:36:17.814405Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=51574 tasks_free=false
+2026-08-25T10:36:18.115761Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=51876 tasks_free=false
+2026-08-25T10:36:18.417387Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=52177 tasks_free=false
+2026-08-25T10:36:18.718881Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=52479 tasks_free=false
+2026-08-25T10:36:19.020189Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=52780 tasks_free=false
+2026-08-25T10:36:19.321610Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=53082 tasks_free=false
+2026-08-25T10:36:19.623484Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=53383 tasks_free=false
+2026-08-25T10:36:19.924597Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=53685 tasks_free=false
+2026-08-25T10:36:20.225767Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=53986 tasks_free=false
+2026-08-25T10:36:20.527123Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=54287 tasks_free=false
+2026-08-25T10:36:20.828394Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=54588 tasks_free=false
+2026-08-25T10:36:21.129888Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=54890 tasks_free=false
+2026-08-25T10:36:21.431414Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=55191 tasks_free=false
+2026-08-25T10:36:21.732543Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=55492 tasks_free=false
+2026-08-25T10:36:22.033895Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=55794 tasks_free=false
+2026-08-25T10:36:22.335142Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=56095 tasks_free=false
+2026-08-25T10:36:22.638727Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=56399 tasks_free=false
+2026-08-25T10:36:22.939971Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=56700 tasks_free=false
+2026-08-25T10:36:23.241079Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=57001 tasks_free=false
+2026-08-25T10:36:23.542379Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=57302 tasks_free=false
+2026-08-25T10:36:23.844217Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=57604 tasks_free=false
+2026-08-25T10:36:24.145509Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=57905 tasks_free=false
+2026-08-25T10:36:24.446947Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=58207 tasks_free=false
+2026-08-25T10:36:24.748709Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=58509 tasks_free=false
+2026-08-25T10:36:25.050302Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=58810 tasks_free=false
+2026-08-25T10:36:25.351802Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=59112 tasks_free=false
+2026-08-25T10:36:25.946716Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=59707 tasks_free=false
+2026-08-25T10:36:26.248065Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=60008 tasks_free=false
+2026-08-25T10:36:26.549866Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=60310 tasks_free=false
+2026-08-25T10:36:26.851270Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=60611 tasks_free=false
+2026-08-25T10:36:27.152365Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=60912 tasks_free=false
+2026-08-25T10:36:27.454104Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=61214 tasks_free=false
+2026-08-25T10:36:27.755683Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=61516 tasks_free=false
+2026-08-25T10:36:28.057903Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=61818 tasks_free=false
+2026-08-25T10:36:28.359326Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=62119 tasks_free=false
+2026-08-25T10:36:28.661547Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=62421 tasks_free=false
+2026-08-25T10:36:28.962654Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=62723 tasks_free=false
+2026-08-25T10:36:29.263814Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=63024 tasks_free=false
+2026-08-25T10:36:29.565394Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=63325 tasks_free=false
+2026-08-25T10:36:29.866513Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=63626 tasks_free=false
+2026-08-25T10:36:30.167876Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=63928 tasks_free=false
+2026-08-25T10:36:30.469308Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=64229 tasks_free=false
+2026-08-25T10:36:30.770412Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=64530 tasks_free=false
+2026-08-25T10:36:31.071649Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=64832 tasks_free=false
+2026-08-25T10:36:31.372998Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=65133 tasks_free=false
+2026-08-25T10:36:31.674079Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=65434 tasks_free=false
+2026-08-25T10:36:31.975229Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=65735 tasks_free=false
+2026-08-25T10:36:32.276517Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=66036 tasks_free=false
+2026-08-25T10:36:32.577444Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=66337 tasks_free=false
+2026-08-25T10:36:32.878543Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=66638 tasks_free=false
+2026-08-25T10:36:33.179714Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=66940 tasks_free=false
+2026-08-25T10:36:33.481096Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=67241 tasks_free=false
+2026-08-25T10:36:33.783022Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=67543 tasks_free=false
+2026-08-25T10:36:34.084205Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=67844 tasks_free=false
+2026-08-25T10:36:34.385676Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=68146 tasks_free=false
+2026-08-25T10:36:34.686972Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=68447 tasks_free=false
+2026-08-25T10:36:34.988444Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=68748 tasks_free=false

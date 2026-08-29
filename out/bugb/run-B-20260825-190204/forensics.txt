@@ -1,0 +1,31 @@
+tag=B wedged=False rounds=1 apiPort=19970 daemonPid=21520
+threads=26
+ 13 x Wait/Unknown
+  9 x Wait/EventPairLow
+  3 x Wait/UserRequest
+  1 x Wait/Executive
+minidump FAILED: This command cannot be run due to the error: An error occurred trying to start process 'C:\WINDOWS\system32\rundll32.exe' with working directory 'E:\Code\ai\smart-downloader'. 拒绝访问。
+final snap: {"task_id":"t1","state":"Paused","source":"Magnet(\"magnet:?xt=urn:btih:a6453589c479ace6613048fb3c607a77495a3f7c\")","dest_root":"E:/Code/ai/smart-downloader/out/bugb/run-B-20260825-190204/downloads","engine":"bt","done":2097152,"total":2097152,"error":null,"files":[{"rel_path":"","done":2097152,"size":2097152}]}
+--- watchdog tail ---
+2026-08-25T11:02:08.583267Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=2005
+2026-08-25T11:02:10.623005Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=4045
+--- fallback job ---
+FBERR: Response status code does not indicate success: 409 (Conflict).
+--- timeline tail ---
+2026-08-25T11:02:06.392372Z  INFO smart_dl_daemon::serve: [bugb] mock provider 注入直链: http://127.0.0.1:21021/mockfile.bin
+2026-08-25T11:02:06.420217Z  INFO smart_dl_daemon::serve: [bugb] mock provider 延迟 Ready: 10s
+2026-08-25T11:02:06.757929Z  INFO smart_dl_daemon::bt: [bugb] bt add 注入直连 peer 127.0.0.1:17082 ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T11:02:06.758916Z  INFO smart_dl_daemon::state: [bugb] autosave BEGIN path="E:/Code/ai/smart-downloader/out/bugb/run-B-20260825-190204/tasks.json"
+2026-08-25T11:02:06.759970Z  INFO smart_dl_daemon::state: [bugb] autosave END
+2026-08-25T11:02:07.084141Z  INFO smart_dl_daemon::bt_events: [bugb] alert-loop alive ticks=1 batch=0
+2026-08-25T11:02:07.601629Z  INFO smart_dl_daemon::state: [bugb] autosave BEGIN path="E:/Code/ai/smart-downloader/out/bugb/run-B-20260825-190204/tasks.json"
+2026-08-25T11:02:07.615453Z  INFO smart_dl_daemon::state: [bugb] autosave END
+2026-08-25T11:02:07.632338Z  INFO smart_dl_daemon::bt_events: [bugb] alert transition task=t1 Queued→Seeding msg=torrent finished
+2026-08-25T11:02:08.214352Z  INFO smart_dl_daemon::bt: [bugb] bt::pause enter ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T11:02:08.218320Z  INFO smart_dl_daemon::bt: [bugb] fastresume request ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T11:02:08.273182Z  INFO smart_dl_daemon::bt: [bugb] fastresume ready ih=a6453589c479ace6613048fb3c607a77495a3f7c elapsed_ms=54
+2026-08-25T11:02:08.275098Z  INFO smart_dl_daemon::bt: [bugb] bt::pause exit ih=a6453589c479ace6613048fb3c607a77495a3f7c elapsed_ms=60
+2026-08-25T11:02:08.583267Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=2005
+2026-08-25T11:02:08.912001Z  INFO smart_dl_daemon::state: [bugb] fallback enter id=t1
+2026-08-25T11:02:08.924999Z  INFO smart_dl_daemon::state: [bugb] fallback gate-passed id=t1 bt_progress=1.0000 → begin_fallback (13ms)
+2026-08-25T11:02:10.623005Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=4045

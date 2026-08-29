@@ -1,0 +1,7 @@
+配置错误: 配置解析失败 "E:\\Code\\ai\\smart-downloader\\out\\bugb\\run-A-20260825-180602\\config.toml": TOML parse error at line 5, column 18
+  |
+5 | dest_root = "E:\Code\ai\smart-downloader\out\bugb\run-A-20260825-180602\downloads"
+  |                  ^
+invalid escape sequence
+expected `b`, `f`, `n`, `r`, `t`, `u`, `U`, `\`, `"`
+

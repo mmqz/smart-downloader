@@ -1,0 +1,19 @@
+[server]
+addr = "127.0.0.1:18420"
+
+[download]
+dest_root = "E:/Code/ai/smart-downloader/out/bugb/run-B-20260825-183524/downloads"
+max_download_kb_s = 64
+
+[bt]
+enabled = true
+
+[provider]
+enabled = true
+mock = true
+
+[storage]
+tasks_path = "E:/Code/ai/smart-downloader/out/bugb/run-B-20260825-183524/tasks.json"
+
+[lock]
+path = "E:/Code/ai/smart-downloader/out/bugb/run-B-20260825-183524/daemon.lock"

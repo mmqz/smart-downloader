@@ -1,0 +1,74 @@
+tag=A wedged=False rounds=135 apiPort=18165 daemonPid=27320
+threads=22
+ 14 x Wait/Unknown
+  5 x Wait/EventPairLow
+  3 x Wait/UserRequest
+minidump FAILED: This command cannot be run due to the error: An error occurred trying to start process 'C:\WINDOWS\system32\rundll32.exe' with working directory 'E:\Code\ai\smart-downloader'. 拒绝访问。
+final snap: {"task_id":"t1","state":"Completed","source":"Magnet(\"magnet:?xt=urn:btih:a6453589c479ace6613048fb3c607a77495a3f7c\")","dest_root":"E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-185355/downloads","engine":"bt","done":0,"total":0,"error":null,"files":[]}
+--- watchdog tail ---
+2026-08-25T10:58:25.714903Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=269315
+2026-08-25T10:58:27.718311Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=271319
+2026-08-25T10:58:29.728895Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=273329
+--- fallback job ---
+{"provider":"mock","provider_task":"mock-1","status":"completed","transferred":["mockfile.bin"]}
+--- timeline tail ---
+2026-08-25T10:58:23.921412Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:24.132806Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=267733 tasks_free=true
+2026-08-25T10:58:24.426959Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=524
+2026-08-25T10:58:24.428181Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:24.434381Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=268035 tasks_free=true
+2026-08-25T10:58:24.735545Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=268336 tasks_free=true
+2026-08-25T10:58:24.937789Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=525
+2026-08-25T10:58:24.938933Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:25.036731Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=268637 tasks_free=true
+2026-08-25T10:58:25.338127Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=268939 tasks_free=true
+2026-08-25T10:58:25.443610Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=526
+2026-08-25T10:58:25.444701Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:25.639929Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=269240 tasks_free=true
+2026-08-25T10:58:25.714903Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=269315
+2026-08-25T10:58:25.941300Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=269542 tasks_free=true
+2026-08-25T10:58:25.955117Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=527
+2026-08-25T10:58:25.956257Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:26.242916Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=269843 tasks_free=true
+2026-08-25T10:58:26.459876Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=528
+2026-08-25T10:58:26.460966Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:26.544317Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=270145 tasks_free=true
+2026-08-25T10:58:26.865020Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=270466 tasks_free=true
+2026-08-25T10:58:26.964203Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=529
+2026-08-25T10:58:26.965213Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:27.166384Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=270767 tasks_free=true
+2026-08-25T10:58:27.467683Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=271068 tasks_free=true
+2026-08-25T10:58:27.473043Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=530
+2026-08-25T10:58:27.473725Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:27.588016Z  INFO smart_dl_httpdl::engine: [bugb] http finalize begin tid=t1-mockfile.bin part="E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-185355/downloads\\mockfile.bin.part" dest="E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-185355/downloads\\mockfile.bin" total=2097152
+2026-08-25T10:58:27.589715Z  INFO smart_dl_httpdl::engine: [bugb] http finalize OK tid=t1-mockfile.bin elapsed_ms=0
+2026-08-25T10:58:27.601290Z  INFO smart_dl_daemon::state: [bugb] sink terminal tid=t1-mockfile.bin ok=true
+2026-08-25T10:58:27.602315Z  INFO smart_dl_daemon::state: [bugb] sink engine.remove done tid=t1-mockfile.bin
+2026-08-25T10:58:27.602876Z  INFO smart_dl_provider::coordinator: [bugb] coord sink.transfer OK tid=t1-mockfile.bin
+2026-08-25T10:58:27.603456Z  INFO smart_dl_daemon::state: [bugb] fallback coordinator-returned id=t1 provider=mock transferred=1 elapsed_ms=270295
+2026-08-25T10:58:27.604036Z  INFO smart_dl_daemon::state: [bugb] fallback bt.remove BEGIN tid=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:58:27.604518Z  INFO smart_dl_daemon::bt: [bugb] bt::remove enter ih=a6453589c479ace6613048fb3c607a77495a3f7c delete_data=false
+2026-08-25T10:58:27.605001Z  INFO smart_dl_daemon::bt: [bugb] fastresume request ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:58:27.605718Z  INFO smart_dl_daemon::bt: [bugb] fastresume ready ih=a6453589c479ace6613048fb3c607a77495a3f7c elapsed_ms=0
+2026-08-25T10:58:27.607233Z  INFO smart_dl_daemon::bt: [bugb] bt::remove fastresume done elapsed_ms=2 → core.remove
+2026-08-25T10:58:27.607809Z  INFO smart_dl_daemon::bt: [bugb] bt::remove exit OK ih=a6453589c479ace6613048fb3c607a77495a3f7c core_remove_ms=3 total_ms=3
+2026-08-25T10:58:27.608312Z  INFO smart_dl_daemon::state: [bugb] fallback bt.remove RETURNED tid=a6453589c479ace6613048fb3c607a77495a3f7c ok=true
+2026-08-25T10:58:27.608826Z  INFO smart_dl_daemon::state: [bugb] autosave BEGIN path="E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-185355/tasks.json"
+2026-08-25T10:58:27.610290Z  INFO smart_dl_daemon::state: [bugb] autosave END
+2026-08-25T10:58:27.718311Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=271319
+2026-08-25T10:58:27.769025Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=271370 tasks_free=true
+2026-08-25T10:58:27.980677Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=531
+2026-08-25T10:58:27.981877Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:28.070167Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=271671 tasks_free=true
+2026-08-25T10:58:28.372351Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=271973 tasks_free=true
+2026-08-25T10:58:28.491187Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=532
+2026-08-25T10:58:28.492229Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:28.673881Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=272274 tasks_free=true
+2026-08-25T10:58:28.975333Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=272576 tasks_free=true
+2026-08-25T10:58:29.001466Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=533
+2026-08-25T10:58:29.002498Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:29.276926Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=272877 tasks_free=true
+2026-08-25T10:58:29.507470Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=534
+2026-08-25T10:58:29.508599Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:58:29.578243Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=273179 tasks_free=true
+2026-08-25T10:58:29.728895Z  INFO smart_dl_daemon::serve: [bugb] watchdog alive uptime_ms=273329

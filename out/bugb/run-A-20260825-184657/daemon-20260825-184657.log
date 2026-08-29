@@ -1,0 +1,28 @@
+2026-08-25T10:46:58.246814Z  INFO smart_dl_daemon::serve: 单实例锁已持有: "E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-184657/daemon.lock"
+2026-08-25T10:46:58.267791Z  INFO smart_dl_daemon::serve: [bugb] mock provider 注入直链: http://127.0.0.1:19415/mockfile.bin
+2026-08-25T10:46:58.284239Z  INFO smart_dl_daemon::serve: [bugb] mock provider 延迟 Ready: 240s
+2026-08-25T10:46:58.300904Z  INFO smart_dl_daemon::serve: 云兜底已启用（provider=mock，开发占位）
+2026-08-25T10:46:58.362552Z  INFO smart_dl_daemon::serve: BT 引擎已启用, 落盘: "E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-184657/downloads"
+2026-08-25T10:46:58.365778Z  INFO smart_dl_daemon::serve: smart-dl-daemon 监听 127.0.0.1:19308
+2026-08-25T10:46:58.668262Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=301 tasks_free=true
+2026-08-25T10:46:58.764875Z  INFO smart_dl_daemon::bt: [bugb] bt add 注入直连 peer 127.0.0.1:16934 ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:46:58.765791Z  INFO smart_dl_daemon::state: [bugb] autosave BEGIN path="E:/Code/ai/smart-downloader/out/bugb/run-A-20260825-184657/tasks.json"
+2026-08-25T10:46:58.766920Z  INFO smart_dl_daemon::state: [bugb] autosave END
+2026-08-25T10:46:58.772688Z  INFO smart_dl_daemon::bt: [bugb] bt::pause enter ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:46:58.773420Z  INFO smart_dl_daemon::bt: [bugb] fastresume request ih=a6453589c479ace6613048fb3c607a77495a3f7c
+2026-08-25T10:46:58.774059Z  INFO smart_dl_daemon::bt: [bugb] fastresume ready ih=a6453589c479ace6613048fb3c607a77495a3f7c elapsed_ms=0
+2026-08-25T10:46:58.775302Z  INFO smart_dl_daemon::bt: [bugb] bt::pause exit ih=a6453589c479ace6613048fb3c607a77495a3f7c elapsed_ms=2
+2026-08-25T10:46:58.877484Z  INFO smart_dl_daemon::bt_events: [bugb] alert-loop alive ticks=1 batch=0
+2026-08-25T10:46:58.878580Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=1
+2026-08-25T10:46:58.879005Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:46:58.969603Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=603 tasks_free=true
+2026-08-25T10:46:59.271124Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=904 tasks_free=true
+2026-08-25T10:46:59.381569Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=0 tick=2
+2026-08-25T10:46:59.382793Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=0
+2026-08-25T10:46:59.572736Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=1206 tasks_free=true
+2026-08-25T10:46:59.651481Z  INFO smart_dl_daemon::state: [bugb] fallback enter id=t1
+2026-08-25T10:46:59.652240Z  INFO smart_dl_daemon::state: [bugb] fallback gate-passed id=t1 bt_progress=1.0000 → begin_fallback (0ms)
+2026-08-25T10:46:59.886664Z  INFO smart_dl_daemon::bt_events: [bugb] batch START n=69 tick=3
+2026-08-25T10:46:59.890101Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=1523 tasks_free=true
+2026-08-25T10:46:59.901902Z  INFO smart_dl_daemon::bt_events: [bugb] batch END n=69
+2026-08-25T10:47:00.219393Z  INFO smart_dl_daemon::serve: [bugb] os-tick alive_ms=1853 tasks_free=true

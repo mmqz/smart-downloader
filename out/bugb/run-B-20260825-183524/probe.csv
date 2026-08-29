@@ -1,0 +1,5 @@
+baseline config=4016ms tasks=4005ms
+baseline config=4015ms
+18:36:10 tasks=4012ms(ok=False) config=4010ms(ok=False)
+18:36:20 tasks=4012ms(ok=False) config=4002ms(ok=False)
+18:36:30 tasks=4010ms(ok=False) config=4005ms(ok=False)
