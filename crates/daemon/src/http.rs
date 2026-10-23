@@ -1081,7 +1081,8 @@ async fn task_fallback(
 
 /// `POST /bt/metadata`（B-1）：magnet → .torrent 元数据抓取（预览/预取 sidecar，
 /// 不建任务、不进 registry）。单并发（进行中 → 409）。
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
+#[ts(export, optional_fields)]
 pub struct MagnetMetaReq {
     pub magnet: String,
     /// 抓取总超时（秒）；缺省 60，clamp 5..=600。
@@ -2993,7 +2994,8 @@ fn finish_router(
 
 /// ===== NAS 引擎管理端点（feature nas）=====
 #[cfg(feature = "nas")]
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, TS)]
+#[ts(export, optional_fields)]
 pub struct NasInstallReq {
     /// SPK 文件路径（daemon 可达）。缺省用 manager 现有配置。
     #[serde(default)]
@@ -3072,7 +3074,8 @@ async fn nas_status(State(_): State<Arc<DaemonState>>) -> Response {
 }
 
 #[cfg(feature = "nas")]
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, TS)]
+#[ts(export)]
 pub struct NasTokenReq {
     /// xluser OAuth token JSON（L1 云登录产物；格式校准=假设区实测项）。
     pub token_json: String,

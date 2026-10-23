@@ -37,6 +37,22 @@ export type { GlobalLimitReq } from "./generated/GlobalLimitReq";
 export type { RssFeedUpdateReq } from "./generated/RssFeedUpdateReq";
 export type { AddRssFeedReq } from "./generated/AddRssFeedReq";
 export type { AddRssRuleReq } from "./generated/AddRssRuleReq";
+// ---- 契约守卫 P2（#161）：settings 域请求类型全量 ts-rs 化 ----
+// putSettings 目前收 Record<string, unknown>（渐进类型化的过渡态）；
+// 下列类型即 PUT /settings 的分域契约，UI 侧类型化改造时以此为准。
+export type { SettingsReq } from "./generated/SettingsReq";
+export type { BandwidthReq } from "./generated/BandwidthReq";
+export type { ConnectionReq } from "./generated/ConnectionReq";
+export type { BtSessionReq } from "./generated/BtSessionReq";
+export type { DownloadReq } from "./generated/DownloadReq";
+export type { CleanupReq } from "./generated/CleanupReq";
+export type { PostDownloadReq } from "./generated/PostDownloadReq";
+export type { WebhookReq } from "./generated/WebhookReq";
+export type { SchedulerReq } from "./generated/SchedulerReq";
+export type { QueueReq } from "./generated/QueueReq";
+export type { MagnetMetaReq } from "./generated/MagnetMetaReq";
+export type { NasInstallReq } from "./generated/NasInstallReq";
+export type { NasTokenReq } from "./generated/NasTokenReq";
 export type { TaskLogs } from "./generated/TaskLogs";
 export type { TaskEvent } from "./generated/TaskEvent";
 export type { SettingsSnapshot as Settings } from "./generated/SettingsSnapshot";
