@@ -2481,7 +2481,10 @@ async fn providers(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
 
 // ===== RSS 订阅自动下载（qbit RSS 对标，v1）=====
 
-#[derive(serde::Deserialize)]
+/// 契约守卫（#161 P1）：与相邻 AddRssRuleReq 同口径纳入 ts-rs——UI 侧
+/// 字段改名时 TS 编译期报错，杜绝 serde 静默丢弃导致「添加订阅空操作」。
+#[derive(serde::Deserialize, TS)]
+#[ts(export)]
 struct AddRssFeedReq {
     url: String,
 }

@@ -5,6 +5,7 @@
 import type {
   AddedCount,
   AddPeersReq,
+  AddRssFeedReq,
   AddRssRuleReq,
   AddTaskReq,
   AnnounceReq,
@@ -16,6 +17,7 @@ import type {
   BatchTaskReq,
   ConnectionsReq,
   FilePriorityEntry,
+  FilePriorityReq,
   FilePrioritiesOut,
   LimitReq,
   PeerResults,
@@ -228,9 +230,10 @@ export class DaemonClient {
     id: string,
     priorities: FilePriorityEntry[],
   ): Promise<FilePrioritiesOut> {
+    const body: FilePriorityReq = { priorities };
     return req(`/tasks/${id}/files/priority`, {
       method: "POST",
-      body: JSON.stringify({ priorities }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -367,8 +370,11 @@ export class DaemonClient {
   rssRules(): Promise<{ rules: RssRule[] }> {
     return req("/rss/rules");
   }
-  rssAddFeed(url: string) {
-    return req("/rss/feeds", { method: "POST", body: JSON.stringify({ url }) });
+  /// 添加订阅（#161 P1）：请求体走生成的 AddRssFeedReq 契约类型——
+  /// 后端字段改名时此处编译期报错（serde 静默丢弃防线）。
+  rssAddFeed(url: string): Promise<{ id: number; title: string; item_count: number }> {
+    const body: AddRssFeedReq = { url };
+    return req("/rss/feeds", { method: "POST", body: JSON.stringify(body) });
   }
   rssRemoveFeed(id: number) {
     return req(`/rss/feeds/${id}`, { method: "DELETE" });

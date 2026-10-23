@@ -35,6 +35,7 @@ export type { BatchTaskReq } from "./generated/BatchTaskReq";
 export type { BatchSelect } from "./generated/BatchSelect";
 export type { GlobalLimitReq } from "./generated/GlobalLimitReq";
 export type { RssFeedUpdateReq } from "./generated/RssFeedUpdateReq";
+export type { AddRssFeedReq } from "./generated/AddRssFeedReq";
 export type { AddRssRuleReq } from "./generated/AddRssRuleReq";
 export type { TaskLogs } from "./generated/TaskLogs";
 export type { TaskEvent } from "./generated/TaskEvent";

@@ -1,7 +1,8 @@
 "use client";
 /// 底部状态栏（Issue #115 Phase 1：28px）。
-/// 本期内容：任务计数 · 选中数 · 会话流量。
-/// Batch D 槽位预留：/health /version /metrics（后续批次填）。
+/// 当前内容：任务计数 · 选中数 · 会话流量。
+/// 说明：后端 /health /version /metrics 端点已实现（E22，http.rs 路由表），
+/// UI 侧尚未接入——状态栏如需展示属独立需求，此处并无预留槽位。
 
 import type { Stats, TaskListItem } from "@/lib/daemon/types";
 import { fmtBytes } from "@/lib/daemon/format";
